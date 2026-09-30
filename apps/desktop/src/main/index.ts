@@ -13,6 +13,8 @@ import {
   CHANNELS,
   type AgendaScope,
   type ClaudeStatus,
+  type JiraCredentialInput,
+  type JiraStatus,
   type MaybeSnapshot,
   type Result,
   type ThemePreference,
@@ -20,7 +22,8 @@ import {
 } from "../shared/api.js";
 import { VaultService } from "./vault-service.js";
 import { readSettings, rememberVault } from "./settings.js";
-import { clearApiKey, secretStatus, setApiKey } from "./secrets.js";
+import { clearApiKey, clearSecret, getSecret, secretStatus, setApiKey, setSecret } from "./secrets.js";
+import { parseStoredCredential, summarise, toStoredCredential } from "./jira-credential.js";
 import { CLAUDE_MODEL, draftItem } from "./claude.js";
 import { attachZoomShortcuts, restoreZoom } from "./zoom.js";
 import { applySavedTheme, applyTheme, backgroundColor, currentTheme } from "./theme.js";
@@ -466,6 +469,22 @@ function registerHandlers(): void {
     return claudeStatus();
   });
 
+  // ------------------------------------------------------------------- Jira
+  // Settings -> Jira. The credential arrives here once and is never returned;
+  // see jira-credential.ts for why site, email and token are one blob.
+
+  handle(CHANNELS.jiraStatus, () => jiraStatus());
+
+  handle(CHANNELS.setJiraCredentials, async (input: JiraCredentialInput) => {
+    await setSecret("jira", JSON.stringify(toStoredCredential(input)));
+    return jiraStatus();
+  });
+
+  handle(CHANNELS.clearJiraCredentials, async () => {
+    await clearSecret("jira");
+    return jiraStatus();
+  });
+
   handle(CHANNELS.draftItem, async (prompt: string, defaultProject: string | null) => {
     if (!service.isOpen) throw new Error("Open a vault before drafting.");
     const snapshot = await service.snapshot();
@@ -570,13 +589,28 @@ function registerHandlers(): void {
 }
 
 /**
+ * The stored Jira credential, told without its token. A blob that will not
+ * decrypt or parse reads as none, which is the rule secrets.ts already keeps
+ * for the Claude key.
+ */
+async function jiraStatus(): Promise<JiraStatus> {
+  const storage = await secretStatus("jira");
+  const stored = parseStoredCredential(await getSecret("jira"));
+  return {
+    storageAvailable: storage.available,
+    ...(stored ? { credential: summarise(stored) } : {}),
+    ...(storage.reason ? { reason: storage.reason } : {}),
+  };
+}
+
+/**
  * The Claude layer's state, reported without ever naming the key.
  *
  * Built here rather than in secrets.ts so the storage layer stays ignorant of
  * which model it is holding a key for.
  */
 async function claudeStatus(): Promise<ClaudeStatus> {
-  const status = await secretStatus();
+  const status = await secretStatus("claude");
   return {
     storageAvailable: status.available,
     hasKey: status.hasKey,
