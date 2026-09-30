@@ -133,6 +133,8 @@ export interface JiraCredentialSummary {
   email: string;
   /** When Test connection last succeeded with this credential. */
   verifiedAt?: string;
+  /** Whose account Jira said the token belongs to, at that check. */
+  accountName?: string;
 }
 
 export interface JiraStatus {
@@ -432,7 +434,13 @@ export interface VaultApi {
   // answer with a status, and no call returns the token.
 
   jiraStatus(): Promise<Result<JiraStatus>>;
+  /**
+   * Verify against Jira, then store. A pair Jira refuses is never stored, so
+   * a saved credential is always one that worked at least once.
+   */
   setJiraCredentials(input: JiraCredentialInput): Promise<Result<JiraStatus>>;
+  /** Re-check the stored pair: tokens expire, and this is how that shows up. */
+  testJiraConnection(): Promise<Result<JiraStatus>>;
   clearJiraCredentials(): Promise<Result<JiraStatus>>;
 
   /**
@@ -533,6 +541,7 @@ export const CHANNELS = {
 
   jiraStatus: "jira:status",
   setJiraCredentials: "jira:set-credentials",
+  testJiraConnection: "jira:test-connection",
   clearJiraCredentials: "jira:clear-credentials",
   jiraPreviewPush: "jira:preview-push",
   jiraPush: "jira:push",

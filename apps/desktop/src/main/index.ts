@@ -23,7 +23,13 @@ import {
 import { VaultService } from "./vault-service.js";
 import { readSettings, rememberVault } from "./settings.js";
 import { clearApiKey, clearSecret, getSecret, secretStatus, setApiKey, setSecret } from "./secrets.js";
-import { parseStoredCredential, summarise, toStoredCredential } from "./jira-credential.js";
+import {
+  forFirstConnect,
+  parseStoredCredential,
+  summarise,
+  toStoredCredential,
+  verifyCredential,
+} from "./jira-credential.js";
 import { previewPush, resolveUncertain, runPush } from "./jira-push.js";
 import { CLAUDE_MODEL, draftItem } from "./claude.js";
 import { attachZoomShortcuts, restoreZoom } from "./zoom.js";
@@ -476,8 +482,25 @@ function registerHandlers(): void {
 
   handle(CHANNELS.jiraStatus, () => jiraStatus());
 
+  // Verified before it is stored. A credential Jira refuses would only sit
+  // there looking configured, and the first push would be where that showed.
+  // The cost is that a connection cannot be saved while Jira is unreachable,
+  // which is also a moment when nothing could be done with it.
   handle(CHANNELS.setJiraCredentials, async (input: JiraCredentialInput) => {
-    await setSecret("jira", JSON.stringify(toStoredCredential(input)));
+    const { stored } = await verifyCredential(toStoredCredential(input)).catch((err: unknown) => {
+      throw forFirstConnect(err);
+    });
+    await setSecret("jira", JSON.stringify(stored));
+    return jiraStatus();
+  });
+
+  // A failure leaves the stored pair alone, verifiedAt and all. The panel shows
+  // Jira's reason (an expired token reads as one) and the date it last worked.
+  handle(CHANNELS.testJiraConnection, async () => {
+    const current = parseStoredCredential(await getSecret("jira"));
+    if (!current) throw new Error("No Jira connection is stored. Enter one first.");
+    const { stored } = await verifyCredential(current);
+    await setSecret("jira", JSON.stringify(stored));
     return jiraStatus();
   });
 
