@@ -3183,3 +3183,74 @@ the strip. `ordering.test.ts` covers everything that's a pure function; the
 e2e file covers the part that isn't — layout, the gesture, and the one thing
 the change put at risk, that closing a card still works once its column is
 gone.
+
+## One launch, one window ✅ built and driven
+
+`npm run shortcut` put an icon on the desktop, and with it made a second
+double-click an ordinary accident rather than something you had to type. The app
+never asked for the single-instance lock, so a second click opened a second
+window over the same vault. IDEAS.md asked for what two instances actually do to
+be established before the fix, because that decides whether the second copy
+should be refused outright or allowed and merely focused.
+
+**What two copies do, measured rather than guessed.** A scratch Playwright probe
+launched two copies against one vault and one user-data directory, then drove
+both. The IDEAS entry's guess was the wrong one:
+
+- *Stale rendering is not the problem.* An edit made in one window showed up in
+  the other within the watcher's debounce. Each copy runs its own `chokidar`,
+  and both see every write.
+- *Key allocation is.* Six creates in one project, alternating between the two
+  windows and fired together, came back as `OPS-6, OPS-6, OPS-7…`. Both calls
+  returned success, and only one `OPS-6` exists on disk. The first item was
+  overwritten and neither window said so. `allocateKey` is a read-modify-write
+  of `.counters.json`. `VaultService.serialize` makes that safe inside one
+  process and does nothing across two.
+- *Git contends too.* Ten concurrent updates produced eight commits and a
+  `Command failed: git add -A` in one window's `gitStatus()`, from the two
+  processes racing for `index.lock`. Nothing was lost, because the other copy's
+  next `add -A` swept the change into a commit that was not its own. But the
+  history banner went unhealthy over a failure that had already healed, and the
+  commit messages no longer described their commits.
+- Chromium also logged `Unable to move the cache: Access is denied` over the
+  shared user-data directory. That is cosmetic, but it shows the profile was
+  never meant to be shared.
+
+Silent overwriting decided it: **refused outright**, and the existing window
+restored and focused. A second copy has nothing to offer that the first does
+not, and "allowed and focused" would have meant keeping a process alive whose
+only safe action is to do nothing.
+
+**`requestSingleInstanceLock()` sits at module scope in `src/main/index.ts`, not
+in the launcher.** A `.vbs` cannot focus a window it did not create, which is why
+the shortcut change left it out. The refused copy calls `app.quit()`, and
+`whenReady` also returns early on `!isPrimaryInstance`, because `quit()` is
+asynchronous and a copy on its way out could otherwise still reopen the vault
+and start a watcher. The `second-instance` handler restores, shows and focuses
+`mainWindow`, or creates one if there is none.
+
+**The refusal prints a line to the terminal.** The lock is keyed on `userData`,
+which `npm run dev` shares with the desktop-icon copy. A developer who runs
+`dev` while the app is already open now gets the running window focused instead
+of a new one. Without the line, that looks exactly like the dev build failing
+to start.
+
+**The lock does not fix the key race; it removes the common way to reach it.**
+The MCP server and the CLI are separate processes over the same vault, so an
+external Claude creating an item at the same moment as the app still goes
+through the same unguarded `.counters.json` read-modify-write. That race needs a
+lock in the core (an exclusive-create lockfile around `allocateKey`, or
+`createItem` refusing to overwrite an existing key file), and it belongs in its
+own change. It is recorded in IDEAS.md.
+
+Verified in `e2e/single-instance.e2e.mts`. The spec launches through the
+harness, minimizes the window, and spawns a bare second Electron against the
+same `--user-data-dir` (not a second `launchHarness`, which would wait for a
+vault table the refused copy never draws). It then asserts that the second copy
+exits 0 inside 15 seconds, that the first window came back from minimized, and
+that there is still exactly one window. Minimizing first is what makes the
+handler's effect observable, because a window already in front looks the same
+whether the handler ran or not. Run against the pre-fix build, the spec fails
+with the second copy still running at 15 seconds. Each harness run gets its own
+temporary user-data directory, so the lock is per run and parallel e2e runs do
+not refuse each other.
