@@ -16,6 +16,7 @@ import type {
   UpdateItemInput,
   UpdateProjectInput,
 } from "todo-vault";
+import type { FieldValueKind } from "todo-vault/jira-meta";
 
 /**
  * The contract between the main process and the renderer.
@@ -141,6 +142,83 @@ export interface JiraStatus {
   credential?: JiraCredentialSummary;
   /** Written for a human, shown when storage is unavailable. */
   reason?: string;
+}
+
+// ------------------------------------------------------------- Jira push
+// Built in main from the vault, the map, the project's metadata and the stored
+// credential. The renderer only ever sees the result: never the token, and
+// never a plan it could edit and send back — the push rebuilds the plan in main
+// from the same keys rather than trusting one that crossed IPC.
+
+/** One field of a draft, as the push pane lists it. */
+export interface JiraDraftFieldView {
+  fieldId: string;
+  /** Jira's own name for it when the project told us, else the id. */
+  name: string;
+  /** A one-line reading of the value: names over ids, ADF as its text. */
+  text: string;
+}
+
+export interface JiraDraftView {
+  localKey: string;
+  summary: string;
+  issueType: string;
+  parentLocalKey?: string;
+  fields: JiraDraftFieldView[];
+  /** The payload exactly as it will be sent, for the pane's Show JSON. */
+  json: string;
+}
+
+/** A selectable value from Jira's own list for a field. */
+export interface JiraChoice {
+  /** Already in the shape Jira's create API takes, e.g. `{ id: "10021" }`. */
+  value: unknown;
+  label: string;
+}
+
+/** An `ask` extra field, offered once per push, prefilled from the map. */
+export interface JiraAskField {
+  fieldId: string;
+  name: string;
+  /** Which control to draw. See `valueKindFor` in `todo-vault/jira-meta`. */
+  kind: FieldValueKind;
+  choices: JiraChoice[];
+  /** The value that will be sent if nothing is changed. */
+  value: unknown;
+}
+
+/** A push attempt that may or may not have reached Jira. */
+export interface JiraUncertainAttempt {
+  localKey: string;
+  summary: string;
+  at: string;
+  /** A Jira search to check, opened in the browser. */
+  searchUrl: string;
+}
+
+export interface JiraPushPreview {
+  site: string;
+  projectKey: string;
+  projectName: string;
+  drafts: JiraDraftView[];
+  warnings: string[];
+  blockers: Array<{ localKey: string; message: string }>;
+  skipped: Array<{ localKey: string; reason: string }>;
+  askFields: JiraAskField[];
+  /** Must be resolved before these items can be pushed again. */
+  uncertain: JiraUncertainAttempt[];
+}
+
+export type JiraPushProgress =
+  | { localKey: string; state: "creating" }
+  | { localKey: string; state: "created"; jiraKey: string; url: string }
+  | { localKey: string; state: "failed"; message: string; uncertain: boolean }
+  | { localKey: string; state: "skipped"; reason: string };
+
+export interface JiraPushOutcome {
+  created: Array<{ localKey: string; jiraKey: string; jiraId: string; url: string }>;
+  failed: Array<{ localKey: string; message: string; fieldErrors: Record<string, string>; uncertain: boolean }>;
+  skipped: Array<{ localKey: string; reason: string }>;
 }
 
 /**
@@ -356,6 +434,25 @@ export interface VaultApi {
   jiraStatus(): Promise<Result<JiraStatus>>;
   setJiraCredentials(input: JiraCredentialInput): Promise<Result<JiraStatus>>;
   clearJiraCredentials(): Promise<Result<JiraStatus>>;
+
+  /**
+   * What pushing these items would send, checked against the project's own
+   * create screens. Never sends. `askValues` are this push's choices for the
+   * map's `ask` fields, by field id.
+   */
+  jiraPreviewPush(keys: string[], askValues: Record<string, unknown>): Promise<Result<JiraPushPreview>>;
+  /**
+   * Create the issues. The plan is rebuilt in main from the same keys and
+   * values, not taken from the preview, and a plan with blockers is refused.
+   * Progress arrives through `onJiraPushProgress` while this is pending.
+   */
+  jiraPush(keys: string[], askValues: Record<string, unknown>): Promise<Result<JiraPushOutcome>>;
+  /**
+   * Settle an uncertain attempt: `jiraKey` when the issue turned out to exist
+   * (it is stamped as pushed), null when it did not (it can be pushed again).
+   */
+  jiraResolveUncertain(localKey: string, jiraKey: string | null): Promise<Result<void>>;
+  onJiraPushProgress(listener: (progress: JiraPushProgress) => void): () => void;
   /**
    * Turn a sentence into a proposed item. Returns a draft for confirmation —
    * this never writes. `defaultProject` is the project the UI has in focus,
@@ -437,8 +534,13 @@ export const CHANNELS = {
   jiraStatus: "jira:status",
   setJiraCredentials: "jira:set-credentials",
   clearJiraCredentials: "jira:clear-credentials",
+  jiraPreviewPush: "jira:preview-push",
+  jiraPush: "jira:push",
+  jiraResolveUncertain: "jira:resolve-uncertain",
   draftItem: "claude:draft",
 
   /** main -> renderer push */
   changed: "vault:changed",
+  /** main -> renderer, while a push is running */
+  jiraPushProgress: "jira:push-progress",
 } as const;

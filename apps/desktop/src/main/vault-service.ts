@@ -309,6 +309,21 @@ export class VaultService extends EventEmitter {
     });
   }
 
+  /**
+   * A read that needs the vault itself rather than a list from it. The Jira
+   * push planner is the one caller: a pushed description resolves its links
+   * and a child's parent through the vault, so it cannot work from items alone.
+   * Synchronous and never writes, so it does not queue behind writes.
+   */
+  read<T>(fn: (vault: Vault) => T): T {
+    return fn(this.requireVault());
+  }
+
+  /** Record that an item now exists in Jira. Queued like every other write. */
+  markPushed(key: string, jiraKey: string, jiraId?: string): Promise<Item> {
+    return this.write((v) => v.markPushed(key, jiraKey, jiraId));
+  }
+
   createItem(input: unknown): Promise<Item> {
     return this.write((v) => v.createItem(input));
   }

@@ -31,6 +31,7 @@ export function BulkBar({
   assignees,
   busy,
   onClear,
+  onPushToJira,
   onUpdate,
 }: {
   checkedItems: Item[];
@@ -40,6 +41,8 @@ export function BulkBar({
   assignees: string[];
   busy: boolean;
   onClear: () => void;
+  /** Opens the push pane for the checked items. */
+  onPushToJira: () => void;
   onUpdate: (patch: Record<string, unknown>) => Promise<BulkUpdateOutcome>;
 }): React.JSX.Element {
   const [assigneeDraft, setAssigneeDraft] = useState("");
@@ -76,6 +79,9 @@ export function BulkBar({
 
       <button className="btn" onClick={onClear} disabled={busy}>
         Clear
+      </button>
+      <button className="btn" onClick={onPushToJira} disabled={busy} title="Review, then create these in Jira">
+        Push to Jira…
       </button>
 
       <select

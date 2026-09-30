@@ -30,6 +30,7 @@ import { THEME_DESCRIPTIONS, THEME_LABELS, nextTheme } from "./theme";
 import { BOARD_ORDER, STATUS_LABELS, isClosed, knownPeople, knownReporters, todayIso } from "./pieces";
 import { BulkBar } from "./BulkBar";
 import { isLater } from "./later";
+import { JiraPush } from "./JiraPush";
 
 type View = "backlog" | "board" | "agenda" | "calendar" | "history";
 
@@ -163,6 +164,8 @@ export function App(): React.JSX.Element {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [claudeOpen, setClaudeOpen] = useState(false);
+  /** The keys the push pane is open for, or null when it is closed. */
+  const [jiraPushKeys, setJiraPushKeys] = useState<string[] | null>(null);
   const [jiraOpen, setJiraOpen] = useState(false);
   /** Set by `e`: the item whose summary should open for editing. Consumed once. */
   const [editSummaryFor, setEditSummaryFor] = useState<string | null>(null);
@@ -1409,6 +1412,7 @@ export function App(): React.JSX.Element {
             assignees={allAssignees}
             busy={vault.busy}
             onClear={clearChecked}
+            onPushToJira={() => setJiraPushKeys([...checked])}
             onUpdate={(patch) => vault.updateItems([...checked], patch)}
           />
         )}
@@ -1427,6 +1431,7 @@ export function App(): React.JSX.Element {
           onClose={() => setDetailKey(null)}
           onSelect={open}
           onDelete={handleDelete}
+          onPushToJira={(key) => setJiraPushKeys([key])}
           onNewChild={(parent, type) =>
             setCreating({ project: parent.project, type, parent: parent.key })
           }
@@ -1434,6 +1439,8 @@ export function App(): React.JSX.Element {
           attachPaths={vault.attachPaths}
         />
       )}
+
+      {jiraPushKeys && <JiraPush keys={jiraPushKeys} onClose={() => setJiraPushKeys(null)} />}
 
       {paletteOpen && (
         <CommandPalette

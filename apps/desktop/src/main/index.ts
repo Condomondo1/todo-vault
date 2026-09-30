@@ -24,6 +24,7 @@ import { VaultService } from "./vault-service.js";
 import { readSettings, rememberVault } from "./settings.js";
 import { clearApiKey, clearSecret, getSecret, secretStatus, setApiKey, setSecret } from "./secrets.js";
 import { parseStoredCredential, summarise, toStoredCredential } from "./jira-credential.js";
+import { previewPush, resolveUncertain, runPush } from "./jira-push.js";
 import { CLAUDE_MODEL, draftItem } from "./claude.js";
 import { attachZoomShortcuts, restoreZoom } from "./zoom.js";
 import { applySavedTheme, applyTheme, backgroundColor, currentTheme } from "./theme.js";
@@ -484,6 +485,24 @@ function registerHandlers(): void {
     await clearSecret("jira");
     return jiraStatus();
   });
+
+  // The push. Keys and ask values in, a preview or an outcome out; the
+  // credential stays in main. See jira-push.ts.
+  handle(CHANNELS.jiraPreviewPush, (keys: string[], askValues: Record<string, unknown>) =>
+    previewPush(service, keys, askValues ?? {}),
+  );
+
+  handle(CHANNELS.jiraPush, (keys: string[], askValues: Record<string, unknown>) =>
+    runPush(service, keys, askValues ?? {}, (progress) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(CHANNELS.jiraPushProgress, progress);
+      }
+    }),
+  );
+
+  handle(CHANNELS.jiraResolveUncertain, (localKey: string, jiraKey: string | null) =>
+    resolveUncertain(service, localKey, jiraKey),
+  );
 
   handle(CHANNELS.draftItem, async (prompt: string, defaultProject: string | null) => {
     if (!service.isOpen) throw new Error("Open a vault before drafting.");

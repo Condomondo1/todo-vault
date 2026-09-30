@@ -3844,3 +3844,99 @@ first write and an in-place edit, refusals leaving the file untouched, and
 covers each outcome above against a hand-built `ProjectMeta`. **Not verified:**
 a real project's metadata has never been fed through the screen checks. The one
 hand-run push in the plan is where that happens.
+
+## The app pushes to Jira: the pane, the send, the journal ✅ built (Jira push, slice C1)
+
+Phase 5's remaining line from the top of this file — "`buildPushPlan` output
+in a review pane, then the POST as an explicit user action" — now exists. Two
+entry points open the pane: **Push to Jira…** on the backlog's bulk bar, for the
+checked rows, and on an unpushed item's Jira row in the detail panel. What
+reaches Jira is decided in three places, each with one job.
+
+**The core sends; it does not decide.** `sendPushPlan` in `jira-push.ts` takes
+a client, a plan and callbacks, and runs the whole send under test against the
+fake `fetch`:
+- **Sequential, parents first.** Jira's bulk endpoint cannot create a parent and
+  its child in one call, and reports partial failure per element.
+- **Each success is stamped** with `markPushed` before the next request, so a
+  crash halfway leaves every created issue stamped, and the next push skips it.
+- **A refused create does not orphan its children.** The children are skipped
+  with the reason, and unrelated items carry on.
+- **A plan with blockers is refused outright.** The pane never offers the button
+  then, and this is the check that does not depend on the pane.
+
+**The journal is for the one ambiguous failure.** When the connection drops
+after a request has left, nobody knows whether Jira created the issue.
+Retrying risks a duplicate in a tracker a whole team reads, and giving up risks
+a lost stamp. So:
+- Each attempt is written to a journal before it is sent, and settled once the
+  outcome is known.
+- A 4xx or 5xx is Jira saying no, so it settles. Only a request with no answer
+  stays open, and so does a create whose stamp failed, because that issue does
+  exist.
+- An open entry holds its item back from later pushes and appears in the pane
+  as *Did these reach Jira?*, with a **Check in Jira** search and two answers.
+  *It exists* takes a key and stamps it. *It was not created* clears the entry.
+
+The journal lives in `userData`, keyed by vault root. It is about this
+machine's requests, and a journal that synced would have another machine asking
+about pushes it never made.
+
+**The search is opened, not run.** The person deciding whether a near-match is
+the same issue is better served by Jira's own results page than by a count.
+The JQL starts from the day *before* the attempt, by date only, because JQL
+reads times in the user's Jira timezone, which the app cannot know. A tight UTC
+window could begin hours after the attempt and miss the very issue being looked
+for. Quotes in the summary are neutralised so they cannot end the phrase early.
+
+**Main holds the credential and rebuilds the plan.** `main/jira-push.ts` is the
+only place the stored credential is read for a push, and it goes no further
+than the client built there. The renderer sends keys and its choices for `ask`
+fields, and gets back a preview, progress events and an outcome. `runPush`
+rebuilds the plan from those keys with freshly fetched metadata, rather than
+trusting the preview it showed. So a field made required in Jira since the
+preview becomes a blocker here instead of a refusal halfway through the batch.
+A module-level flag turns a double click into one push.
+
+**The token goes only to the site it was saved for.** This check was proposed
+by the slice-B session. `pushTargetProblem` refuses unless the map's `baseUrl`
+normalises to exactly the credential's site. The map is a file in a synced,
+committed folder that anyone with the vault can edit; if it could point a push
+somewhere else, the token would go with it. A scoped token's cloud id comes from
+the credential (Settings → Jira caches it there), then from the map, then from
+a fresh lookup, so a credential saved before that cache existed still works.
+
+**The preview re-plans as `ask` values change.** It waits a moment after the
+last change, so the blockers shown always match what would be sent. Project
+metadata is cached in main for ten minutes, keyed by site, token kind, project
+and mapped issue types, so each re-plan is not a dozen requests. Each `ask`
+control is chosen by `valueKindFor`:
+- selects for options, versions, components and priority, built from Jira's own
+  `allowedValues` and sent by id
+- checkboxes for their multi-value forms
+- typed inputs for text, number and dates
+- a JSON box for everything whose shape varies by site, labelled as sent exactly
+  as written
+
+**The button says what it does:** *Create 3 issues in ENG*. It is the one action
+in the app that writes somewhere other than the vault.
+
+**Deliberately left for slice C2:** a push driven end to end against the fake
+HTTPS Jira the slice-B session is building (`e2e/fake-jira.mts`). One fake, not
+two, because Test connection needs it as well.
+
+322 tests green (187 core, 91 app, 44 scripts), typecheck clean.
+`test/jira-push.test.ts` covers:
+- order and parent keys, with a stamp before each next request
+- the blocker refusal, with nothing sent
+- a 400 with its field errors, whose child is skipped rather than sent unparented
+- a dropped connection left journalled as uncertain
+- a created-but-unstamped issue kept in the journal
+- the site-match refusal in all four shapes
+- the search URL's day-early window and quote handling
+
+`e2e/jira-push-pane.e2e.mts` opens the pane from both entry points in the built
+app and confirms that, with no credential saved, main's refusal is shown and
+the create button is disabled. **Not verified:** no issue has been created by
+this code in any Jira, fake or real. C2 covers the fake, and the plan's one
+hand-run push covers the real one.

@@ -81,6 +81,19 @@ export type {
   JiraMyself,
 } from "./jira-client.js";
 export {
+  issueUrl,
+  pushTargetProblem,
+  sendPushPlan,
+  uncertainAttemptSearchUrl,
+} from "./jira-push.js";
+export type {
+  PushAttempt,
+  PushJournal,
+  PushOutcome,
+  PushProgress,
+  SendOptions,
+} from "./jira-push.js";
+export {
   ALWAYS_SENT,
   distinctFields,
   fetchFieldsFor,

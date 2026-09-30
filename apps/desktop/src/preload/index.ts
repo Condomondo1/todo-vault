@@ -52,6 +52,15 @@ const api: VaultApi = {
   jiraStatus: () => ipcRenderer.invoke(CHANNELS.jiraStatus),
   setJiraCredentials: (input) => ipcRenderer.invoke(CHANNELS.setJiraCredentials, input),
   clearJiraCredentials: () => ipcRenderer.invoke(CHANNELS.clearJiraCredentials),
+  jiraPreviewPush: (keys, askValues) => ipcRenderer.invoke(CHANNELS.jiraPreviewPush, keys, askValues),
+  jiraPush: (keys, askValues) => ipcRenderer.invoke(CHANNELS.jiraPush, keys, askValues),
+  jiraResolveUncertain: (localKey, jiraKey) =>
+    ipcRenderer.invoke(CHANNELS.jiraResolveUncertain, localKey, jiraKey),
+  onJiraPushProgress: (listener) => {
+    const wrapped = (_event: unknown, progress: Parameters<typeof listener>[0]): void => listener(progress);
+    ipcRenderer.on(CHANNELS.jiraPushProgress, wrapped);
+    return () => ipcRenderer.removeListener(CHANNELS.jiraPushProgress, wrapped);
+  },
   draftItem: (prompt, defaultProject) =>
     ipcRenderer.invoke(CHANNELS.draftItem, prompt, defaultProject),
 
