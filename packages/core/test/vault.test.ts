@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { promises as fs, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -2085,6 +2085,147 @@ test("gitStatus tells the truth about whether history is being kept", async () =
   assert.equal(status.isRepo, false);
   assert.equal(status.healthy, false, "must not claim health outside a repo");
   assert.ok(status.lastError, "and must say why, rather than staying quiet");
+});
+
+// ------------------------------------------------------------ turning on history
+
+/**
+ * Runs `fn` with git blind to the global and system config, so "no identity"
+ * is true on any machine rather than only on one that never set one up.
+ * Repo-local config still counts, which is what the method writes.
+ */
+async function withoutGitIdentity<T>(fn: () => Promise<T>): Promise<T> {
+  const empty = path.join(await fs.mkdtemp(path.join(os.tmpdir(), "vault-gitconfig-")), "config");
+  await fs.writeFile(empty, "");
+  const saved = { global: process.env.GIT_CONFIG_GLOBAL, nosystem: process.env.GIT_CONFIG_NOSYSTEM };
+  process.env.GIT_CONFIG_GLOBAL = empty;
+  process.env.GIT_CONFIG_NOSYSTEM = "1";
+  try {
+    return await fn();
+  } finally {
+    if (saved.global === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = saved.global;
+    if (saved.nosystem === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+    else process.env.GIT_CONFIG_NOSYSTEM = saved.nosystem;
+  }
+}
+
+const IDENTITY = { name: "Vault Owner", email: "owner@example.com" };
+
+test("turnOnHistory asks for an identity before it touches anything", async () => {
+  await withoutGitIdentity(async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vault-turn-on-"));
+    const vault = await Vault.init(dir, { git: true });
+
+    assert.deepEqual(await vault.turnOnHistory(), { outcome: "needs-identity" });
+    assert.equal(await pathExists(path.join(dir, ".git")), false, "no repo that could not commit");
+    assert.equal(await pathExists(path.join(dir, ".gitattributes")), false);
+  });
+});
+
+test("turnOnHistory writes attributes, inits, signs locally, and proves a commit lands", async () => {
+  await withoutGitIdentity(async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vault-turn-on-"));
+    const vault = await Vault.init(dir, { git: true });
+    await vault.createProject({ key: "ACME", name: "Acme" });
+    await vault.createItem({ project: "ACME", summary: "Written before history existed" });
+
+    const result = await vault.turnOnHistory({ identity: { name: " Vault Owner ", email: IDENTITY.email } });
+    assert.equal(result.outcome, "done");
+    assert.equal(result.outcome === "done" && result.commit.subject, "Turn on history");
+
+    assert.equal(await fs.readFile(path.join(dir, ".gitattributes"), "utf8"), "* text eol=lf\n");
+    const local = (key: string) =>
+      execFileAsync("git", ["config", "--local", key], { cwd: dir }).then((r) => r.stdout.trim());
+    assert.equal(await local("user.name"), "Vault Owner", "trimmed, and repo-local");
+    assert.equal(await local("user.email"), IDENTITY.email);
+
+    // The first commit carries what was already there, attributes included.
+    const { stdout: tracked } = await execFileAsync("git", ["ls-files"], { cwd: dir });
+    assert.ok(tracked.includes(".gitattributes"));
+    assert.ok(tracked.split("\n").some((f) => f.startsWith("items/")));
+    assert.equal(await commitCount(dir), 1);
+    assert.equal((await vault.gitStatus()).healthy, true);
+
+    // And the auto-commit after it works, which is the thing all of this was for.
+    await vault.createItem({ project: "ACME", summary: "Written after" });
+    assert.equal(await commitCount(dir), 2);
+    assert.equal((await vault.gitStatus()).healthy, true);
+  });
+});
+
+test("turnOnHistory repairs a repo whose commits were failing, and clears the error", async () => {
+  await withoutGitIdentity(async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vault-turn-on-"));
+    await execFileAsync("git", ["init", "-q"], { cwd: dir });
+    const vault = await Vault.init(dir, { git: true });
+    await vault.createProject({ key: "ACME", name: "Acme" });
+    const before = await vault.gitStatus();
+    assert.equal(before.healthy, false);
+    assert.ok(before.lastError, "no identity, so the auto-commit failed and said so");
+
+    const result = await vault.turnOnHistory({ identity: IDENTITY });
+    assert.equal(result.outcome, "done");
+    const after = await vault.gitStatus();
+    assert.equal(after.lastError, undefined);
+    assert.equal(after.healthy, true);
+  });
+});
+
+test("turnOnHistory explains a nesting instead of doing it, and does it when asked", async () => {
+  const outer = await fs.mkdtemp(path.join(os.tmpdir(), "vault-turn-on-outer-"));
+  await execFileAsync("git", ["init", "-q"], { cwd: outer });
+  await fs.writeFile(path.join(outer, ".gitignore"), "tasks/\n");
+  const vault = await Vault.init(path.join(outer, "tasks"), { git: true });
+  assert.equal((await vault.gitStatus()).ignored, true);
+
+  // Compared as real paths. On a CI runner os.tmpdir() is spelled with an 8.3
+  // short name (C:\Users\RUNNER~1\...), and git answers with the long one
+  // for the same directory.
+  const real = (p: string) => realpathSync.native(p);
+
+  const refused = await vault.turnOnHistory({ identity: IDENTITY });
+  assert.equal(refused.outcome, "nested");
+  assert.equal(refused.outcome === "nested" && real(refused.repoRoot), real(outer));
+  assert.equal(await pathExists(path.join(vault.root, ".git")), false);
+
+  const done = await vault.turnOnHistory({ identity: IDENTITY, allowNested: true });
+  assert.equal(done.outcome, "done");
+  const status = await vault.gitStatus();
+  assert.equal(real(status.repoRoot ?? ""), real(vault.root), "its own repo now");
+  assert.equal(status.ignored, false);
+  assert.equal(status.healthy, true);
+});
+
+test("turnOnHistory leaves an existing .gitattributes alone and rejects a bad identity", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vault-turn-on-"));
+  const vault = await Vault.init(dir, { git: true });
+  await fs.writeFile(path.join(dir, ".gitattributes"), "*.md text eol=lf\n*.pdf binary\n");
+
+  await assert.rejects(
+    vault.turnOnHistory({ identity: { name: "Owner", email: "not-an-email" } }),
+    /not an email address/,
+  );
+  await assert.rejects(vault.turnOnHistory({ identity: { name: "  ", email: IDENTITY.email } }), /name/);
+
+  assert.equal((await vault.turnOnHistory({ identity: IDENTITY })).outcome, "done");
+  assert.equal(
+    await fs.readFile(path.join(dir, ".gitattributes"), "utf8"),
+    "*.md text eol=lf\n*.pdf binary\n",
+  );
+});
+
+test("turnOnHistory says git is missing rather than failing", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vault-turn-on-"));
+  const vault = await Vault.init(dir, { git: true });
+  const saved = process.env.PATH;
+  process.env.PATH = "";
+  try {
+    assert.deepEqual(await vault.turnOnHistory({ identity: IDENTITY }), { outcome: "no-git" });
+  } finally {
+    process.env.PATH = saved;
+  }
+  assert.equal(await pathExists(path.join(dir, ".gitattributes")), false);
 });
 
 // ------------------------------------------------------------------ history
