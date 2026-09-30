@@ -24,6 +24,43 @@ import { isInAppNavigation } from "./navigation.js";
 const service = new VaultService();
 let mainWindow: BrowserWindow | undefined;
 
+/**
+ * One running copy per user-data directory, which in practice means one per
+ * user.
+ *
+ * Refused outright rather than allowed-and-focused, because two copies over one
+ * vault do real damage rather than cosmetic damage. Each keeps its own write
+ * queue (see VaultService.serialize), and nothing serializes across processes.
+ * When the two collide, `allocateKey`'s read-modify-write of `.counters.json`
+ * hands both creates the same key, and the second silently overwrites the first
+ * while both windows report success. Concurrent `git add -A`s fight over
+ * `index.lock`, which turns one window's history banner red over a failure the
+ * other window's next commit quietly absorbs. Being out of date is not a
+ * problem: each window's watcher does catch up with the other's edits.
+ *
+ * The lock is keyed on `userData`, so each e2e run's throwaway
+ * `--user-data-dir` gets a lock of its own and parallel runs do not refuse
+ * each other.
+ */
+const isPrimaryInstance = app.requestSingleInstanceLock();
+if (!isPrimaryInstance) {
+  // Worth a line in the terminal: under `npm run dev`, with the desktop-icon
+  // copy already open, this exit is the whole of what the developer sees.
+  console.error("[main] Vault is already running; focusing that window instead.");
+  app.quit();
+}
+
+/** A second launch lands here, in the copy that kept the lock. */
+app.on("second-instance", () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (app.isReady()) createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
+
 // Link targets reach this handler from hand-edited frontmatter and the MCP
 // server, not just this UI, so an unchecked scheme is a local-code-execution
 // vector (file:, javascript:, ms-msdt:, search-ms:), not just a UX nicety.
@@ -512,6 +549,10 @@ async function claudeStatus(): Promise<ClaudeStatus> {
 }
 
 app.whenReady().then(async () => {
+  // app.quit() above is asynchronous, so a refused copy can still become ready.
+  // It must not reopen the vault or start a watcher on its way out.
+  if (!isPrimaryInstance) return;
+
   registerHandlers();
 
   // Before any vault opens, so the first one already knows which folders it

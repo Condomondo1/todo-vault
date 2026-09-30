@@ -8,30 +8,22 @@ for the shape of one of those).
 Newest at the top. No status tracking here — once something's picked up, its
 entry moves out to wherever it's being built.
 
-## A second double-click opens a second window over the same vault
+## Two processes creating at once can be handed the same key
 
-The app never calls `requestSingleInstanceLock()`, so nothing stops two copies
-running against one vault. That was survivable while every launch meant typing a
-command in a terminal — you knew you had already started it, because you were
-looking at it. `npm run shortcut` puts an icon on the desktop and makes an
-accidental double-launch ordinary, so this stopped being theoretical the moment
-that shipped.
+Measured while building the single-instance lock (PLAN.md, "One launch, one
+window"). Six creates fired together from two app windows came back as `OPS-6,
+OPS-6, OPS-7…`, both calls reported success, and the first `OPS-6` was silently
+overwritten. `allocateKey` reads `.counters.json`, increments it and writes it
+back, and nothing guards that sequence across processes. `VaultService`'s queue
+only serializes within one.
 
-What two instances actually do to a vault is the part that needs establishing
-before the fix, rather than after. Writes are atomic and each item is its own
-file, so the damage is not obviously corruption; the likelier symptom is one
-window holding a stale render of an item the other just rewrote, since each has
-its own `chokidar` watcher and its own idea of what is on disk. Worth reproducing
-deliberately — two windows, edit the same item in both — because the answer
-decides whether the second instance should be refused outright or allowed and
-merely focused.
-
-The usual shape is a lock plus a `second-instance` handler that focuses the
-existing window, which is the right behaviour for a desktop icon: clicking it
-twice should get you back to the app you already have, not a rival copy of it.
-It belongs in `src/main/index.ts` rather than in the launcher — a `.vbs` cannot
-focus a window it did not create — which is why it was left out of the change
-that made the shortcut.
+The lock closed the easy way to reach this, but not the only one. The app, the
+MCP server and the CLI are still three processes over one vault. The narrowest
+fix is in the core: have the item write refuse to replace a key file that
+already exists (`wx`, the exclusive-create flag) and retry allocation on
+`EEXIST`. Losing the race then costs a retry instead of an item. A lockfile
+around the whole allocation also works, but on Windows it brings stale-lock
+recovery with it.
 
 ## Removing a comment, and detaching a copied attachment
 
