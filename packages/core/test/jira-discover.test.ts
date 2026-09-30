@@ -4,14 +4,14 @@ import test from "node:test";
 import {
   matchIssueTypes,
   matchJiraFields,
-  normaliseBaseUrl,
   renderDiscovered,
   type JiraField,
 } from "../src/jira-discover.js";
+import { normaliseBaseUrl } from "../src/jira-client.js";
 
 /**
- * Shaped like a real `GET /rest/api/3/field` response: a few system fields with
- * plain ids, then the custom ones whose numbers differ on every site — which is
+ * Shaped like the fields a project's create metadata offers: a few system fields
+ * with plain ids, then the custom ones whose numbers differ on every site — which is
  * the entire reason this command exists.
  */
 const FIELDS: JiraField[] = [

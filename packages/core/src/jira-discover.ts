@@ -11,8 +11,8 @@
  *
  * **It only reads.** `jira.ts` opens by saying the vault is upstream of Jira and
  * never a mirror of it: "we generate a payload, you review it, and only then
- * does anything leave the machine". Discovery is two GETs against metadata
- * endpoints. Nothing is created, updated or transitioned.
+ * does anything leave the machine". Discovery is GETs against one project's
+ * metadata endpoints. Nothing is created, updated or transitioned.
  *
  * **It prints; it does not write `jira-map.yaml`.** The menu's `[C] Connect
  * Claude` settled this argument once already — it composes a config block and
@@ -22,7 +22,8 @@
  * explaining what each value is for, and a writer would have to either preserve
  * them by hand or destroy them. So this emits a fragment to paste.
  */
-import { z } from "zod";
+import { createJiraClient } from "./jira-client.js";
+import { distinctFields, fetchProjectMeta } from "./jira-meta.js";
 
 /** Credentials for Jira Cloud, which authenticates with an email and an API token. */
 export interface JiraAuth {
@@ -226,88 +227,35 @@ export function renderDiscovered(input: {
 
 // --------------------------------------------------------------------- network
 
-/** Only the parts of each response this reads, so a shape change fails here and says so. */
-const FieldsResponse = z.array(
-  z.object({ id: z.string(), name: z.string(), custom: z.boolean().optional() }),
-);
-
-const CreateMetaResponse = z.object({
-  projects: z
-    .array(z.object({ issuetypes: z.array(z.object({ name: z.string() })).default([]) }))
-    .default([]),
-});
-
-/** Trailing slashes are the most common way a pasted site URL differs from a usable one. */
-export function normaliseBaseUrl(raw: string): string {
-  return raw.trim().replace(/\/+$/, "");
-}
-
-async function getJson(url: string, auth: JiraAuth): Promise<unknown> {
-  // Basic over email:token is what Jira Cloud accepts; there is no bearer form
-  // for an API token. Built here rather than passed in so the token is not
-  // sitting formatted in a caller's scope.
-  const credentials = Buffer.from(`${auth.email}:${auth.token}`).toString("base64");
-
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      headers: { Authorization: `Basic ${credentials}`, Accept: "application/json" },
-    });
-  } catch (err) {
-    throw new Error(
-      `Could not reach ${url}. ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  if (response.status === 401 || response.status === 403) {
-    throw new Error(
-      `Jira rejected the credentials (${response.status}). Check JIRA_EMAIL is the account's email address and that JIRA_TOKEN is a current API token from id.atlassian.com.`,
-    );
-  }
-  if (response.status === 404) {
-    throw new Error(`${url} returned 404. Check the site URL, and that the project key exists.`);
-  }
-  if (!response.ok) {
-    throw new Error(`${url} returned ${response.status} ${response.statusText}.`);
-  }
-
-  return response.json();
-}
-
-/** `GET /rest/api/3/field` — every field on the instance, system and custom. */
-export async function fetchFields(baseUrl: string, auth: JiraAuth): Promise<JiraField[]> {
-  return FieldsResponse.parse(await getJson(`${baseUrl}/rest/api/3/field`, auth));
-}
-
-/** `GET /rest/api/3/issue/createmeta` — the issue type names offered for one project. */
-export async function fetchIssueTypeNames(
-  baseUrl: string,
-  auth: JiraAuth,
-  projectKey: string,
-): Promise<string[]> {
-  const url = `${baseUrl}/rest/api/3/issue/createmeta?projectKeys=${encodeURIComponent(projectKey)}&expand=projects.issuetypes.fields`;
-  const parsed = CreateMetaResponse.parse(await getJson(url, auth));
-  return parsed.projects.flatMap((p) => p.issuetypes.map((t) => t.name));
-}
-
 /**
- * The whole command: two GETs, then the pure matchers, then a fragment.
+ * The whole command: read the project's own create metadata, then the pure
+ * matchers, then a fragment.
  *
- * Thin on purpose. Everything worth testing is above this line, and this is the
- * part no test can reach without a live instance to point at.
+ * Through `createJiraClient`, like every other request to Jira, so discovery
+ * gets the same https-only, one-origin, no-redirect rules as the push. It used
+ * to have its own fetch helper, and it used to match names against
+ * `GET /rest/api/3/field` — every field on the *site* — which could propose a
+ * field this project's create screen does not have. It also read the
+ * `createmeta?expand=projects.issuetypes.fields` form Atlassian has deprecated.
+ * Both are gone: names are matched against the fields this project offers,
+ * read through the paginated per-project createmeta endpoints.
  */
 export async function discoverJiraMap(
   baseUrl: string,
   auth: JiraAuth,
   projectKey: string,
+  doFetch?: typeof fetch,
 ): Promise<string> {
-  const site = normaliseBaseUrl(baseUrl);
-  const fields = matchJiraFields(await fetchFields(site, auth));
-  const { matched, unmatched } = matchIssueTypes(await fetchIssueTypeNames(site, auth, projectKey));
+  const client = createJiraClient({ site: baseUrl, email: auth.email, token: auth.token, fetch: doFetch });
+  const meta = await fetchProjectMeta(client, projectKey);
+  const fields = matchJiraFields(
+    distinctFields(meta).map((f) => ({ id: f.fieldId, name: f.name, custom: f.schema.custom !== undefined })),
+  );
+  const { matched, unmatched } = matchIssueTypes(meta.issueTypes.map((t) => t.name));
 
   return renderDiscovered({
-    baseUrl: site,
-    projectKey,
+    baseUrl: client.site,
+    projectKey: meta.projectKey,
     fields,
     issueTypes: matched,
     unmatchedTypes: unmatched,

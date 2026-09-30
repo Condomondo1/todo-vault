@@ -10,13 +10,14 @@
 #     vault jira discover --url https://yoursite.atlassian.net --project ENG
 #
 # It prints a fragment to paste in here, annotated with the name each id had on
-# your site. It reads two endpoints and writes nothing:
+# your site. It reads only the project you name, and writes nothing:
 #
-#   GET /rest/api/3/field
-#   GET /rest/api/3/issue/createmeta?projectKeys=ENG&expand=projects.issuetypes.fields
+#   GET /rest/api/3/project/ENG
+#   GET /rest/api/3/issue/createmeta/ENG/issuetypes
+#   GET /rest/api/3/issue/createmeta/ENG/issuetypes/{issueTypeId}   (one per type)
 #
-# Hitting those by hand and searching the JSON still works and is what discover
-# does for you.
+# Only fields on this project's create screens are considered, so a field that
+# exists elsewhere on your site but not here is never proposed.
 #
 # This file is never sent anywhere. It is used only to build a payload you
 # review before anything leaves the machine.

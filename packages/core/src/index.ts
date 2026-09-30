@@ -63,6 +63,42 @@ export {
   toJiraCsv,
   JiraMapSchema,
 } from "./jira.js";
+export {
+  apiRoot,
+  createJiraClient,
+  normaliseBaseUrl,
+  resolveCloudId,
+  retryAfterMs,
+  JiraError,
+} from "./jira-client.js";
+export type {
+  JiraAuthKind,
+  JiraClient,
+  JiraClientOptions,
+  JiraErrorKind,
+  JiraMyself,
+} from "./jira-client.js";
+export {
+  ALWAYS_SENT,
+  distinctFields,
+  fetchFieldsFor,
+  fetchIssueTypes,
+  fetchProject,
+  fetchProjectMeta,
+  fieldOn,
+  issueTypeNamed,
+  requiredGaps,
+  searchAssignable,
+  valueKindFor,
+} from "./jira-meta.js";
+export type {
+  FieldValueKind,
+  IssueTypeMeta,
+  JiraFieldMeta,
+  JiraFieldSchema,
+  JiraUser,
+  ProjectMeta,
+} from "./jira-meta.js";
 export type {
   JiraMap,
   JiraPushPlan,
