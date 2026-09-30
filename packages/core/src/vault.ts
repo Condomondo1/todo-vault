@@ -2226,6 +2226,16 @@ export class Vault {
   }
 
   /**
+   * Commit a file the vault keeps but does not write itself — `jira-map.yaml`,
+   * written by `writeJiraMap` — so a change made in Settings → Jira lands in
+   * history like every other write, and can be taken back the same way.
+   * Best-effort, exactly as the vault's own commits are.
+   */
+  async commitChange(message: string): Promise<void> {
+    await this.commit(message);
+  }
+
+  /**
    * Best-effort git commit. Never throws — version history is a bonus, not a
    * dependency — but the reason for a failure is kept so `gitStatus()` can
    * report it. Silently doing nothing is the failure that loses work.

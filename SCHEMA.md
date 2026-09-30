@@ -87,7 +87,7 @@ Legal needs to review sections 4 and 7 before this goes out.
 | `category` | string | Your grouping. Becomes a label or custom field on push — `jira-map.yaml` decides which — and counts as drift either way. |
 | `labels` | string[] | Passes straight through to Jira. |
 | `components` | string[] | Passes straight through to Jira. |
-| `assignee` | string | Who is doing it. Pushed to Jira's `assignee`. Filtered case-insensitively — spellings of one person fold together, so the app's assignee menu and `listItems` agree. |
+| `assignee` | string | Who is doing it. Pushed to Jira's `assignee` as the account id `jira-map.yaml`'s `people` maps the name to; a name with no entry is pushed unassigned, with a warning, since Jira Cloud does not accept names. Filtered case-insensitively — spellings of one person fold together, so the app's assignee menu and `listItems` agree. |
 | `reporter` | string | Who asked for it. Filtered case-insensitively, same rule as `assignee`. **Not pushed** — `buildPushPlan` maps `assignee` only, and `pushableFields` ignores this, so editing it does not count as drift. |
 | `startDate` / `dueDate` | `YYYY-MM-DD` | `dueDate` is standard in Jira; `startDate` is a custom field. **`startDate` is written by the app** when an item enters `in_progress` — see below. |
 | `estimate` | number | Story points or hours — `jira-map.yaml` decides which. |

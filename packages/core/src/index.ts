@@ -57,7 +57,9 @@ export type { Tickable } from "./recurrence.js";
 export {
   blocksToWiki,
   buildPushPlan,
+  jiraMapPath,
   loadJiraMap,
+  writeJiraMap,
   markdownToAdf,
   selectPushable,
   toJiraCsv,
@@ -101,8 +103,11 @@ export type {
 } from "./jira-meta.js";
 export type {
   JiraMap,
+  JiraMapEdit,
+  JiraPushBlocker,
   JiraPushPlan,
   JiraIssueDraft,
+  PushPlanOptions,
   JiraCsvColumn,
   JiraCsvOptions,
   JiraCsvResult,
