@@ -1,10 +1,16 @@
 import { useEffect, useState } from "react";
 import type { JiraAuthKind, JiraCredentialInput, JiraStatus, Result } from "@shared/api";
 
+import { JiraMapping } from "./JiraMapping";
+
 const TOKEN_PAGE = "https://id.atlassian.com/manage-profile/security/api-tokens";
 
 /**
- * Settings → Jira, the connection half: where the credential goes in.
+ * Settings → Jira: two tabs, Connection (here) and Mapping (JiraMapping.tsx).
+ * They are tabs rather than one long panel so that each stays short: the
+ * connection is set once, and the mapping is revisited as the project changes.
+ *
+ * Connection is where the credential goes in.
  *
  * Same rule as ClaudeSettings: the token is typed here, sent to main once, and
  * never read back, so this panel can say *that* a credential is stored and for
@@ -31,6 +37,7 @@ export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.El
   const [pending, setPending] = useState<"connect" | "test" | "remove" | null>(null);
   /** A short confirmation after a Test connection that passed. */
   const [confirmed, setConfirmed] = useState<string | null>(null);
+  const [tab, setTab] = useState<"connection" | "mapping">("connection");
 
   useEffect(() => {
     let live = true;
@@ -76,6 +83,10 @@ export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.El
 
   const credential = status?.credential;
   const showForm = status?.storageAvailable && (!credential || entering);
+  // Mapping reads the project with the stored credential, so it needs one, and
+  // not one half-replaced: while Replace is open the panel is about the pair.
+  const mappingAvailable = Boolean(credential) && !entering;
+  const shown = mappingAvailable ? tab : "connection";
   const complete = Boolean(draft.site.trim() && draft.email.trim() && draft.token.trim());
   const save = (): void => {
     if (complete && !busy) void run("connect", () => window.vault.setJiraCredentials(draft));
@@ -85,9 +96,29 @@ export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.El
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-narrow" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-jira" onClick={(e) => e.stopPropagation()}>
         <header className="modal-head">
           <h2>Jira</h2>
+          <div className="tabs jira-tabs" role="tablist">
+            {(
+              [
+                ["connection", "Connection"],
+                ["mapping", "Mapping"],
+              ] as const
+            ).map(([which, label]) => (
+              <button
+                key={which}
+                role="tab"
+                className="tab"
+                aria-selected={shown === which}
+                disabled={which === "mapping" && !mappingAvailable}
+                title={which === "mapping" && !credential ? "Connect first" : undefined}
+                onClick={() => setTab(which)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <div className="spacer" />
           <button className="btn" onClick={onClose} aria-label="Close">
             ✕
@@ -95,144 +126,157 @@ export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.El
         </header>
 
         <div className="modal-body">
-          <p className="field-note">
-            Connect once, and the app can create issues in one Jira Cloud project from items you
-            review first. Connecting only asks Jira whose token this is; nothing about your items
-            is sent from here.
-          </p>
-
-          {!status && !error && <p className="field-note">Checking…</p>}
-
-          {status && (
-            <>
-              <div className="claude-state">
-                <span
-                  className="dot"
-                  style={{ background: credential ? "var(--done)" : "var(--todo)" }}
-                />
-                {!status.storageAvailable
-                  ? "Unavailable on this machine"
-                  : credential
-                    ? `${credential.accountName ? `${credential.accountName} · ` : ""}${credential.email} on ${new URL(credential.site).host}`
-                    : "Not connected"}
-                <span className="spacer" />
-                {credential && (
-                  <span className="pill" title="When Test connection last succeeded">
-                    {credential.verifiedAt
-                      ? `verified ${new Date(credential.verifiedAt).toLocaleDateString()}`
-                      : "not verified yet"}
-                  </span>
-                )}
-              </div>
-
-              {!status.storageAvailable && (
-                <div className="banner banner-warn">
-                  <span style={{ flex: 1 }}>
-                    {status.reason ??
-                      "Encrypted storage is not available, so there is nowhere safe to keep a token."}
-                  </span>
-                </div>
-              )}
-
-              {showForm && (
-                <form
-                  className="jira-connect"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    save();
-                  }}
-                >
-                  <label>
-                    <span>Jira site</span>
-                    <input
-                      value={draft.site}
-                      autoFocus
-                      placeholder="https://yourcompany.atlassian.net"
-                      onChange={(e) => set({ site: e.target.value })}
-                    />
-                  </label>
-
-                  <fieldset className="jira-auth-kind">
-                    <legend>Token kind</legend>
-                    {(
-                      [
-                        ["site", "Classic token", "It can do anything your account can."],
-                        [
-                          "scoped",
-                          "Scoped token",
-                          "Recommended. Limited to the scopes you choose when you create it.",
-                        ],
-                      ] as Array<[JiraAuthKind, string, string]>
-                    ).map(([kind, label, note]) => (
-                      <label key={kind} className="jira-auth-option">
-                        <input
-                          type="radio"
-                          name="jira-auth"
-                          checked={draft.auth === kind}
-                          onChange={() => set({ auth: kind })}
-                        />
-                        <span>
-                          {label}
-                          <small>{note}</small>
-                        </span>
-                      </label>
-                    ))}
-                  </fieldset>
-
-                  <label>
-                    <span>Atlassian account email</span>
-                    <input
-                      type="email"
-                      value={draft.email}
-                      placeholder="you@yourcompany.com"
-                      onChange={(e) => set({ email: e.target.value })}
-                    />
-                  </label>
-
-                  <label>
-                    <span>API token</span>
-                    <input
-                      type="password"
-                      value={draft.token}
-                      onChange={(e) => set({ token: e.target.value })}
-                    />
-                  </label>
-
-                  <p className="field-note">
-                    Create one at{" "}
-                    <button
-                      type="button"
-                      className="link-button"
-                      onClick={() =>
-                        void window.vault.openTarget({ kind: "external", value: TOKEN_PAGE })
-                      }
-                    >
-                      id.atlassian.com
-                    </button>
-                    . A scoped token needs to read and write Jira work items, and to read users
-                    for the assignee search.
-                  </p>
-                  {/* Submitting from any field, as in every other form here. */}
-                  <button type="submit" hidden />
-                </form>
-              )}
-
-              {status.storageAvailable && (
-                <p className="field-note">
-                  The token is stored encrypted by the operating system, in the app&rsquo;s own
-                  data folder. It is never written to the vault, which is synced and committed to
-                  git. It is only ever sent to Atlassian, for the site above.
-                </p>
-              )}
-            </>
+          {/*
+            Kept mounted while hidden, so a project loaded on Mapping is still
+            there after a look at Connection. Mounted only with a credential,
+            since everything it does asks Jira.
+          */}
+          {credential && (
+            <div role="tabpanel" aria-label="Mapping" className="jira-tabpanel" hidden={shown !== "mapping"}>
+              <JiraMapping />
+            </div>
           )}
 
-          {confirmed && <p className="field-note jira-confirmed">{confirmed}</p>}
-          {error && <div className="modal-error">{error}</div>}
+          <div role="tabpanel" aria-label="Connection" className="jira-tabpanel" hidden={shown !== "connection"}>
+            <p className="field-note">
+              Connect once, and the app can create issues in one Jira Cloud project from items you
+              review first. Connecting only asks Jira whose token this is; nothing about your items
+              is sent from here.
+            </p>
+
+            {!status && !error && <p className="field-note">Checking…</p>}
+
+            {status && (
+              <>
+                <div className="claude-state">
+                  <span
+                    className="dot"
+                    style={{ background: credential ? "var(--done)" : "var(--todo)" }}
+                  />
+                  {!status.storageAvailable
+                    ? "Unavailable on this machine"
+                    : credential
+                      ? `${credential.accountName ? `${credential.accountName} · ` : ""}${credential.email} on ${new URL(credential.site).host}`
+                      : "Not connected"}
+                  <span className="spacer" />
+                  {credential && (
+                    <span className="pill" title="When Test connection last succeeded">
+                      {credential.verifiedAt
+                        ? `verified ${new Date(credential.verifiedAt).toLocaleDateString()}`
+                        : "not verified yet"}
+                    </span>
+                  )}
+                </div>
+
+                {!status.storageAvailable && (
+                  <div className="banner banner-warn">
+                    <span style={{ flex: 1 }}>
+                      {status.reason ??
+                        "Encrypted storage is not available, so there is nowhere safe to keep a token."}
+                    </span>
+                  </div>
+                )}
+
+                {showForm && (
+                  <form
+                    className="jira-connect"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      save();
+                    }}
+                  >
+                    <label>
+                      <span>Jira site</span>
+                      <input
+                        value={draft.site}
+                        autoFocus
+                        placeholder="https://yourcompany.atlassian.net"
+                        onChange={(e) => set({ site: e.target.value })}
+                      />
+                    </label>
+
+                    <fieldset className="jira-auth-kind">
+                      <legend>Token kind</legend>
+                      {(
+                        [
+                          ["site", "Classic token", "It can do anything your account can."],
+                          [
+                            "scoped",
+                            "Scoped token",
+                            "Recommended. Limited to the scopes you choose when you create it.",
+                          ],
+                        ] as Array<[JiraAuthKind, string, string]>
+                      ).map(([kind, label, note]) => (
+                        <label key={kind} className="jira-auth-option">
+                          <input
+                            type="radio"
+                            name="jira-auth"
+                            checked={draft.auth === kind}
+                            onChange={() => set({ auth: kind })}
+                          />
+                          <span>
+                            {label}
+                            <small>{note}</small>
+                          </span>
+                        </label>
+                      ))}
+                    </fieldset>
+
+                    <label>
+                      <span>Atlassian account email</span>
+                      <input
+                        type="email"
+                        value={draft.email}
+                        placeholder="you@yourcompany.com"
+                        onChange={(e) => set({ email: e.target.value })}
+                      />
+                    </label>
+
+                    <label>
+                      <span>API token</span>
+                      <input
+                        type="password"
+                        value={draft.token}
+                        onChange={(e) => set({ token: e.target.value })}
+                      />
+                    </label>
+
+                    <p className="field-note">
+                      Create one at{" "}
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() =>
+                          void window.vault.openTarget({ kind: "external", value: TOKEN_PAGE })
+                        }
+                      >
+                        id.atlassian.com
+                      </button>
+                      . A scoped token needs to read and write Jira work items, and to read users
+                      for the assignee search.
+                    </p>
+                    {/* Submitting from any field, as in every other form here. */}
+                    <button type="submit" hidden />
+                  </form>
+                )}
+
+                {status.storageAvailable && (
+                  <p className="field-note">
+                    The token is stored encrypted by the operating system, in the app&rsquo;s own
+                    data folder. It is never written to the vault, which is synced and committed to
+                    git. It is only ever sent to Atlassian, for the site above.
+                  </p>
+                )}
+              </>
+            )}
+
+            {confirmed && <p className="field-note jira-confirmed">{confirmed}</p>}
+            {error && <div className="modal-error">{error}</div>}
+          </div>
         </div>
 
         <footer className="modal-foot">
-          {credential && !entering && (
+          {credential && !entering && shown === "connection" && (
             <>
               <button
                 className="btn btn-danger"

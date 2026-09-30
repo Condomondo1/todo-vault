@@ -16,7 +16,7 @@ import type {
   UpdateItemInput,
   UpdateProjectInput,
 } from "todo-vault";
-import type { FieldValueKind } from "todo-vault/jira-meta";
+import type { FieldValueKind, ProjectMeta } from "todo-vault/jira-meta";
 
 /**
  * The contract between the main process and the renderer.
@@ -144,6 +144,57 @@ export interface JiraStatus {
   credential?: JiraCredentialSummary;
   /** Written for a human, shown when storage is unavailable. */
   reason?: string;
+}
+
+// --------------------------------------------------------- Jira mapping
+// Settings -> Jira's second half: which Jira project, and which of its issue
+// types and fields the vault's own go to. Extra fields and people are separate.
+
+/** The vault's item types, each of which goes to one Jira issue type. */
+export type VaultIssueType = "epic" | "story" | "task" | "bug" | "subtask";
+
+/**
+ * What the mapping panel chooses. Deliberately not a set of map edits: the
+ * renderer says what it picked, and main decides what is written. In
+ * particular, `baseUrl`, `auth` and `cloudId` are never in here. Main writes
+ * them from the verified credential, so nothing the renderer sends can point
+ * the map, and with it the token, at another site.
+ */
+export interface JiraMappingChoice {
+  projectKey: string;
+  issueTypes: Record<VaultIssueType, string>;
+  fields: {
+    /** A date field's id, or absent to send no start date. */
+    startDate?: string;
+    /** A number field's id, or absent to send no estimate. */
+    estimate?: string;
+    /** "labels" to fold the category into labels, or a text field's id. */
+    category: string;
+  };
+}
+
+/** The mapping as `jira-map.yaml` has it now, or `exists: false` before the first save. */
+export type JiraMapState =
+  | { exists: false }
+  | {
+      exists: true;
+      projectKey: string;
+      baseUrl?: string;
+      issueTypes: Record<VaultIssueType, string>;
+      fields: { startDate?: string; estimate?: string; category: string };
+      /**
+       * Required fields on a mapped issue type that nothing under this map can
+       * fill in. Absent until this project's metadata has been loaded in this
+       * session, because only Jira knows what its create screens require.
+       */
+      gaps?: JiraMappingGap[];
+    };
+
+/** One required field no mapping fills: "Story requires Team, which nothing fills in". */
+export interface JiraMappingGap {
+  issueType: string;
+  fieldId: string;
+  fieldName: string;
 }
 
 // ------------------------------------------------------------- Jira push
@@ -441,6 +492,16 @@ export interface VaultApi {
   setJiraCredentials(input: JiraCredentialInput): Promise<Result<JiraStatus>>;
   /** Re-check the stored pair: tokens expire, and this is how that shows up. */
   testJiraConnection(): Promise<Result<JiraStatus>>;
+  /** The map in the open vault, read fresh. */
+  jiraLoadMap(): Promise<Result<JiraMapState>>;
+  /**
+   * One project's issue types and every type's create-screen fields, read
+   * with the stored credential. Setup wants them all, since which types will
+   * be mapped is the question being answered.
+   */
+  jiraLoadMeta(projectKey: string): Promise<Result<ProjectMeta>>;
+  /** Write the mapping into `jira-map.yaml`, comments kept, and commit it. */
+  jiraSaveMap(choice: JiraMappingChoice): Promise<Result<JiraMapState>>;
   clearJiraCredentials(): Promise<Result<JiraStatus>>;
 
   /**
@@ -542,6 +603,9 @@ export const CHANNELS = {
   jiraStatus: "jira:status",
   setJiraCredentials: "jira:set-credentials",
   testJiraConnection: "jira:test-connection",
+  jiraLoadMap: "jira:load-map",
+  jiraLoadMeta: "jira:load-meta",
+  jiraSaveMap: "jira:save-map",
   clearJiraCredentials: "jira:clear-credentials",
   jiraPreviewPush: "jira:preview-push",
   jiraPush: "jira:push",

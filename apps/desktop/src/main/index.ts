@@ -4,16 +4,22 @@ import { promises as fs } from "node:fs";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
 import {
+  fetchProjectMeta,
   formatZodError,
+  jiraMapPath,
+  loadJiraMap,
   type HistoryQuery,
   type Status,
   type TurnOnHistoryOptions,
 } from "todo-vault";
+import type { ProjectMeta } from "todo-vault/jira-meta";
 import {
   CHANNELS,
   type AgendaScope,
   type ClaudeStatus,
   type JiraCredentialInput,
+  type JiraMapState,
+  type JiraMappingChoice,
   type JiraStatus,
   type MaybeSnapshot,
   type Result,
@@ -25,11 +31,14 @@ import { readSettings, rememberVault } from "./settings.js";
 import { clearApiKey, clearSecret, getSecret, secretStatus, setApiKey, setSecret } from "./secrets.js";
 import {
   forFirstConnect,
+  openClient,
   parseStoredCredential,
   summarise,
   toStoredCredential,
   verifyCredential,
+  type StoredJiraCredential,
 } from "./jira-credential.js";
+import { mapState, mappingEdits, normaliseProjectKey } from "./jira-mapping.js";
 import { previewPush, resolveUncertain, runPush } from "./jira-push.js";
 import { CLAUDE_MODEL, draftItem } from "./claude.js";
 import { attachZoomShortcuts, restoreZoom } from "./zoom.js";
@@ -504,6 +513,35 @@ function registerHandlers(): void {
     return jiraStatus();
   });
 
+  // The mapping. Reads go to Jira with the stored credential. The save goes
+  // to the vault's jira-map.yaml, queued and committed like any other write.
+
+  handle(CHANNELS.jiraLoadMap, async (): Promise<JiraMapState> => {
+    const root = service.root;
+    if (!root) throw new Error("Open a vault first: the Jira mapping lives in it.");
+    const file = jiraMapPath(root);
+    try {
+      await fs.access(file);
+    } catch {
+      return { exists: false };
+    }
+    const stored = parseStoredCredential(await getSecret("jira").catch(() => null));
+    return mapState(await loadJiraMap(file), stored ? mappingMetaFor(stored.site) : undefined);
+  });
+
+  handle(CHANNELS.jiraLoadMeta, async (projectKey: string) => {
+    const stored = await requireJiraCredential();
+    const { client } = await openClient(stored);
+    const meta = await fetchProjectMeta(client, normaliseProjectKey(projectKey));
+    mappingMeta = { site: stored.site, meta };
+    return meta;
+  });
+
+  handle(CHANNELS.jiraSaveMap, async (choice: JiraMappingChoice) => {
+    const stored = await requireJiraCredential();
+    return mapState(await service.saveJiraMap(mappingEdits(choice, stored)), mappingMetaFor(stored.site));
+  });
+
   handle(CHANNELS.clearJiraCredentials, async () => {
     await clearSecret("jira");
     return jiraStatus();
@@ -628,6 +666,25 @@ function registerHandlers(): void {
       return null;
     },
   );
+}
+
+/**
+ * The project metadata the mapping panel last loaded, kept so a load or save
+ * of the map can say which required fields it leaves unfilled without asking
+ * Jira again. It is tagged with the site it came from: after Replace points
+ * the credential at another site, it answers for nothing.
+ */
+let mappingMeta: { site: string; meta: ProjectMeta } | null = null;
+
+function mappingMetaFor(site: string): ProjectMeta | undefined {
+  return mappingMeta?.site === site ? mappingMeta.meta : undefined;
+}
+
+/** The stored credential, for a handler that cannot do anything without one. */
+async function requireJiraCredential(): Promise<StoredJiraCredential> {
+  const stored = parseStoredCredential(await getSecret("jira"));
+  if (!stored) throw new Error("No Jira connection is stored. Connect in Settings → Jira first.");
+  return stored;
 }
 
 /**

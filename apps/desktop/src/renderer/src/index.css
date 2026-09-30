@@ -2627,6 +2627,74 @@ kbd.pill {
   color: var(--done);
 }
 
+/* One width for both tabs, wide enough for the mapping's "Start date
+   (customfield_10015) — on Story, Task" options, so switching never resizes. */
+.modal-jira {
+  width: min(640px, 100%);
+}
+
+.jira-tabs {
+  margin-left: 12px;
+}
+
+.tab:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.jira-tabpanel,
+.jira-mapping {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The display above would otherwise beat the attribute's own display: none. */
+.jira-tabpanel[hidden] {
+  display: none;
+}
+
+.jira-mapping h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+/* The key and its Load button on one line, the button level with the input. */
+.jira-mapping .modal-row {
+  align-items: flex-end;
+}
+
+/* Two columns of label-over-select, sharing .jira-auth-kind's legend look. */
+.jira-types {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px 12px;
+}
+
+.jira-types legend {
+  grid-column: 1 / -1;
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.jira-types select {
+  min-width: 0;
+}
+
+.jira-mapping-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* An external link that has to go through main (openTarget), so it is a
    button dressed as a link rather than an <a> the window would navigate. */
 .link-button {
