@@ -384,46 +384,18 @@ So the standing advice survives in a sharper form. Check the field list rather
 than the prose — and when the two disagree, ask which one Jira would agree with
 before assuming the prose is the stale half.
 
-## "Scheduled" as a seventh status — and the two clogs it would paper over
+## A `parked` status, if Hide later turns out not to be enough
 
-The complaint is real and `SCHEMA.md` already concedes it in as many words: a
-daily task "sits in `todo` forever and accumulates completions". Nothing about
-that is a bug, and it is exactly what makes the `todo` pile stop being a list of
-what to do next. But the ask bundles two failures with different shapes, and they
-want separating before a mechanism gets picked, because neither one obviously
-needs a status.
+**The two filters this entry used to prescribe are built:** see PLAN.md, "The pile
+can hide work that is not for today". A future-start `todo` and a recurring item
+already ticked this period both drop out under the toolbar's Hide later, and
+`ItemFilter` has `startBefore`/`startAfter`. The argument for building those
+first — **does the item leave the state on its own, or does a person decide it
+leaves?** — is recorded there too. Do not reopen "scheduled" as a status: a date
+arriving is the clock, and a status for it goes stale the morning it comes true.
 
-**The recurring half is not an information problem.** `isSettledForWindow` and
-`isTickedFor` already exist in `recurrence.ts` and import nothing. `isTickedFor`
-is already imported by `Board.tsx` and `BacklogTable.tsx` — both render
-`<Cadence ticked>` on the card — while `isSettledForWindow`, which is the one a
-filter would actually want, is so far used only by `agenda()` in the core. It is
-exported on the same `todo-vault/recurrence` subpath, so reaching it is an
-import, not a plumbing job. So the board already knows this period's turn is done and already
-says so. What it does not do is *act*: a daily item ticked an hour ago holds the
-same slot in the `todo` column, and counts the same in the sidebar, as one nobody
-has touched all week. The agenda got this right and is the precedent — it drops
-settled items rather than retiring them. The board and table want the same
-reading, as a filter beside the existing cadence dropdown in `App.tsx`, not as a
-status.
-
-**The scheduled half is a genuine gap, in a different field.** `startDate` is
-stored, editable in `ItemDetail`, in `pushableFields`, and now written by the app
-when work starts — and it filters nothing, anywhere. `ItemFilter` has `dueBefore`
-and `dueAfter` with no start equivalent, so work that begins in September is
-indistinguishable, in every view, from work actionable this morning. That is the clog described, and the missing piece is the
-neighbour `dueBefore` never got, not a new value in an enum.
-
-Which is the distinction worth writing down, because it decides this and will
-decide the next one like it: **does the item leave the state on its own, or does a
-person decide it leaves?** A start date arriving is the clock, so it should be
-derived — a status for it goes stale the morning it comes true, and the only fixes
-are a sweep on load or nothing. A sweep means the app rewrites `status` on files
-it merely opened, which lands in git history as an edit nobody made, and the
-frontmatter ordering exists precisely so diffs mean something.
-
-That leaves one case a status genuinely fits, and it is worth asking whether it is
-the real ask: *"I have decided not to look at this until later, and I will not
+That leaves the one case a status genuinely fits, and it is worth asking whether
+it is the real ask: *"I have decided not to look at this until later, and I will not
 invent a start date to say so."* That is a decision, not a date, and nothing in
 the schema records it — `blocked` is close but claims something external is in the
 way. If that is what is wanted it should be named for the decision, `parked` or
@@ -453,11 +425,9 @@ dot has to pass `--disregard`'s test — seventh hue distinguishable from six ot
 at 7px — while wanting to read as *quiet*, which is what `--todo`'s grey already
 is.
 
-Cheapest first step is the same either way, and it is neither: the two filters.
-Both are additive, both use helpers that already exist, and together they make
-the pile mean "actionable now" without committing the schema to anything. If it
-still feels clogged afterwards, what is left is the parked decision — visible on
-its own, which is the only honest way to price a seventh status.
+The test for whether this is needed is using Hide later for a while. If the pile
+still feels clogged with it ticked, what is left is the parked decision — visible
+on its own, which is the only honest way to price a seventh status.
 
 ## OneDrive links through the MCP server, not pasted into the description
 
