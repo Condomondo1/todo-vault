@@ -2722,6 +2722,89 @@ test("a key whose file exists but will not parse is skipped, not overwritten", a
   assert.equal(await fs.readFile(broken, "utf8"), "---\nthis: [is not valid\n---\n");
 });
 
+test("a move past a key it did not know about undoes its claim and lands further on", async () => {
+  const vault = await tmpVault();
+  await vault.createProject({ key: "OPS", name: "Ops" });
+  const story = await vault.createItem({ project: "ACME", type: "story", summary: "Story" });
+  await vault.createItem({
+    project: "ACME",
+    type: "subtask",
+    summary: "Subtask",
+    parent: story.key,
+  });
+  // The subtree is handed OPS-1 and OPS-2. OPS-1 is claimed, OPS-2 is not
+  // free, so OPS-1 has to be given back before the retry.
+  const broken = path.join(vault.root, "items", "OPS-2.md");
+  await fs.writeFile(broken, "---\nthis: [is not valid\n---\n");
+  await vault.load();
+
+  const result = await vault.moveItemsToProject(story.key, "OPS");
+  assert.deepEqual(
+    result.rekeyed.map((r) => r.to),
+    ["OPS-3", "OPS-4"],
+  );
+  assert.equal(await fs.readFile(broken, "utf8"), "---\nthis: [is not valid\n---\n");
+  assert.equal(await pathExists(path.join(vault.root, "items", "OPS-1.md")), false);
+
+  const reopened = await Vault.open(vault.root);
+  assert.deepEqual(
+    reopened.listItems({ project: "OPS" }).items.map((i) => i.key).sort(),
+    ["OPS-3", "OPS-4"],
+  );
+  assert.equal(reopened.getItem("OPS-4").parent, "OPS-3");
+});
+
+test("a rename onto a key with a file already there refuses and changes nothing", async () => {
+  const vault = await tmpVault();
+  await vault.createItem({ project: "ACME", summary: "One" });
+  await vault.createItem({ project: "ACME", summary: "Two" });
+  const stray = path.join(vault.root, "items", "NEW-2.md");
+  await fs.writeFile(stray, "---\nthis: [is not valid\n---\n");
+
+  await assert.rejects(() => vault.renameProject("ACME", "NEW"), /NEW-2 already has a file/);
+  assert.equal(await fs.readFile(stray, "utf8"), "---\nthis: [is not valid\n---\n");
+  assert.equal(await pathExists(path.join(vault.root, "items", "NEW-1.md")), false);
+
+  const reopened = await Vault.open(vault.root);
+  assert.equal(reopened.getProject("ACME").key, "ACME");
+  assert.deepEqual(
+    reopened.listItems({ project: "ACME" }).items.map((i) => i.summary).sort(),
+    ["One", "Two"],
+  );
+});
+
+test("moves into a project while another vault creates there never overwrite an item", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vault-move-race-"));
+  const first = await Vault.init(dir);
+  await first.createProject({ key: "ACME", name: "Acme" });
+  await first.createProject({ key: "OPS", name: "Ops" });
+  const movers: Item[] = [];
+  for (let n = 0; n < 4; n++) {
+    movers.push(await first.createItem({ project: "ACME", summary: `moved ${n}` }));
+  }
+  const second = await Vault.open(dir);
+
+  // One vault's moves are sequential, since one Vault re-keying twice at once
+  // is not what this is about. They run against the other vault's creates.
+  const moves = (async () => {
+    for (const item of movers) await second.moveItemsToProject(item.key, "OPS");
+  })();
+  const creates = Promise.all(
+    Array.from({ length: 8 }, (_, n) =>
+      first.createItem({ project: "OPS", summary: `created ${n}` }),
+    ),
+  );
+  await Promise.all([moves, creates]);
+
+  const fresh = await Vault.open(dir);
+  const ops = fresh.listItems({ project: "OPS", limit: 500 }).items;
+  assert.deepEqual(
+    ops.map((i) => i.summary).sort(),
+    [...movers.map((i) => i.summary), ...Array.from({ length: 8 }, (_, n) => `created ${n}`)].sort(),
+  );
+  assert.equal(fresh.listItems({ project: "ACME", limit: 500 }).items.length, 0);
+});
+
 // ------------------------------------------------------------- atomic writes
 
 // Staging a real EPERM by holding a file handle open is not attempted here:

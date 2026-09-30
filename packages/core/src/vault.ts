@@ -58,6 +58,21 @@ export class VaultError extends Error {
   }
 }
 
+/**
+ * A re-key found a file already sitting at one of its new keys. That is either
+ * another process that created there first, or a hand-edited item that will not
+ * parse and so is missing from the index. Nothing was changed. `moveItemsToProject`
+ * catches this and retries past `key`. Anything else lets the message through.
+ */
+class KeyTakenError extends VaultError {
+  constructor(readonly key: string) {
+    super(
+      `${key} already has a file on disk that this vault did not know about ` +
+        `(another process created it, or it will not parse). Nothing was changed.`,
+    );
+  }
+}
+
 export interface VaultOptions {
   /** Auto-commit every write to git, giving you free undo and an audit trail. */
   git?: boolean;
@@ -1591,15 +1606,39 @@ export class Vault {
       finalParent = item.parent;
     }
 
-    const mapping = new Map<string, string>();
-    for (const member of subtree) {
-      mapping.set(member.key, await this.allocateKey(targetProject));
+    // Same race as createItem: another process can be handed the same numbers
+    // in the target. rekeyItems claims every new key before it changes
+    // anything, so a lost claim leaves the vault as it was, and the move comes
+    // back round from past the key it lost. Each key also floors the next, so
+    // the subtree cannot be handed one number twice even if the counter write
+    // quietly failed.
+    let mapping = new Map<string, string>();
+    let above = 0;
+    for (let attempt = 1; ; attempt++) {
+      mapping = new Map();
+      let floor = above;
+      for (const member of subtree) {
+        const next = await this.allocateKey(targetProject, floor);
+        mapping.set(member.key, next);
+        floor = keyNumber(next);
+      }
+      try {
+        await this.rekeyItems(
+          mapping,
+          new Map([[key, { parent: finalParent } as Partial<Item>]]),
+        );
+        break;
+      } catch (err) {
+        if (!(err instanceof KeyTakenError)) throw err;
+        if (attempt >= MAX_KEY_ATTEMPTS) {
+          throw new VaultError(
+            `Could not find free keys in ${targetProject} after ${attempt} tries. ` +
+              `Something else is creating items there as fast as this can.`,
+          );
+        }
+        above = keyNumber(err.key);
+      }
     }
-
-    await this.rekeyItems(
-      mapping,
-      new Map([[key, { parent: finalParent } as Partial<Item>]]),
-    );
 
     const rekeyed = [...mapping].map(([from, to]) => ({ from, to }));
     await this.commit(
@@ -1758,6 +1797,7 @@ export class Vault {
     }
 
     const rewritten: Item[] = [];
+    const arriving = new Set<string>();
     const vacated: string[] = [];
     const attachMoves: Array<{ from: string; to: string }> = [];
 
@@ -1785,6 +1825,7 @@ export class Vault {
       if (!keyChanged && !linksChanged && mappedParent === item.parent && !override) continue;
 
       if (keyChanged) {
+        arriving.add(newKey);
         vacated.push(this.itemPath(item.key));
         attachMoves.push({
           from: this.attachmentDir(item.key),
@@ -1804,8 +1845,35 @@ export class Vault {
       });
     }
 
-    // Attachment folders first: the paths written into frontmatter should point
-    // at something real by the time the file lands.
+    // Claim every new home before touching anything else, by creating its file
+    // exclusively, as createItem does. A file already there belongs to another
+    // process or is a hand-edit that will not parse, and a replacing write would
+    // destroy either. Claiming first is what makes that recoverable: if one
+    // claim fails, the only changes so far are the files this call just created,
+    // so removing them puts the vault back exactly as it was. A key that some
+    // other item in this mapping is vacating (a chain like A→B, B→C) is already
+    // ours, and keeps the replacing write.
+    const vacatedPaths = new Set(vacated);
+    const claims = rewritten.filter(
+      (i) => arriving.has(i.key) && !vacatedPaths.has(this.itemPath(i.key)),
+    );
+    const claimed: string[] = [];
+    for (const item of claims) {
+      try {
+        await this.writeAndIndex(item, true);
+        claimed.push(item.key);
+      } catch (err) {
+        for (const key of claimed) {
+          await fs.rm(this.itemPath(key), { force: true });
+          this.items.delete(key);
+        }
+        throw hasErrorCode(err, "EEXIST") ? new KeyTakenError(item.key) : err;
+      }
+    }
+
+    // Then the attachment folders, so the paths the claimed files record point
+    // at something real a moment later. Doing these first would mean undoing
+    // renames on a failed claim, and a rename back can itself fail on Windows.
     for (const move of attachMoves) {
       if (await pathExists(move.from)) {
         await fs.mkdir(path.dirname(move.to), { recursive: true });
@@ -1813,7 +1881,10 @@ export class Vault {
       }
     }
 
-    for (const item of rewritten) await this.writeAndIndex(item);
+    const claimedSet = new Set(claimed);
+    for (const item of rewritten) {
+      if (!claimedSet.has(item.key)) await this.writeAndIndex(item);
+    }
 
     // Drop the files left behind, but never one that is now someone's new home.
     const live = new Set(rewritten.map((i) => this.itemPath(i.key)));
@@ -2265,12 +2336,18 @@ export class Vault {
 // ------------------------------------------------------------------ helpers
 
 /**
- * How many keys `createItem` will try before giving up. Each lost race moves
- * the floor past the key that was lost, so hitting this means twenty keys in a
- * row were taken between allocation and write. That is not a race any more;
- * it is something broken, and it should be said rather than retried forever.
+ * How many keys `createItem` (or key sets `moveItemsToProject`) will try
+ * before giving up. Each lost race moves the floor past the key that was lost,
+ * so hitting this means twenty keys in a row were taken between allocation and
+ * write. That is not a race any more; it is something broken, and it should be
+ * said rather than retried forever.
  */
 const MAX_KEY_ATTEMPTS = 20;
+
+/** The number in `ACME-12`. */
+function keyNumber(key: string): number {
+  return Number.parseInt(key.slice(key.lastIndexOf("-") + 1), 10);
+}
 
 /** See `advanceCounter`: enough to outlast a burst of concurrent creates. */
 const COUNTER_WRITE_ATTEMPTS = 8;
