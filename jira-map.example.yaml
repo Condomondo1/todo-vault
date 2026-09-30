@@ -1,8 +1,10 @@
 # Jira field mapping.
 #
-# Copy this to <vault>/jira-map.yaml and fill it in for YOUR instance. Almost
-# every value below differs between Jira sites, which is why this is config and
-# not code.
+# Copy this to <vault>/jira-map.yaml and fill it in for YOUR instance, or let
+# the desktop app's Settings → Jira write it for you: the app starts from this
+# very text and edits values in place, so these comments survive. Almost every
+# value below differs between Jira sites, which is why this is config and not
+# code.
 #
 # To fill in the custom field ids, let the CLI read them off your instance:
 #
@@ -25,8 +27,20 @@
 # Where these items land. This is the Jira project key, not your vault key.
 jiraProjectKey: ENG
 
-# Used only to build clickable links back to created issues.
+# Your Jira site. Links back to created issues are built from it, and a classic
+# API token is sent here.
 baseUrl: https://yourcompany.atlassian.net
+
+# "site" for a classic API token, sent to baseUrl. "scoped" for a scoped token,
+# which Atlassian only accepts through its API gateway; the gateway needs the
+# site's cloud id, which Settings → Jira looks up for you.
+auth: site
+# cloudId: 11111111-2222-3333-4444-555555555555
+
+# The credential itself is never in this file. The desktop app keeps it in your
+# OS credential store; the CLI reads JIRA_EMAIL and JIRA_TOKEN from the
+# environment. This file is committed with the vault, so a token here would be
+# in its git history for good.
 
 # Local item type -> Jira issue type NAME as it appears on the create screen.
 # Team-managed and company-managed projects often differ here, and some sites
@@ -50,11 +64,14 @@ fields:
   # Start date is a custom field on essentially every instance, and the id is
   # different on each one. customfield_10015 is a common default on Jira Cloud
   # but do not trust it — look it up. Leave this out and the push will warn you
-  # rather than silently dropping your start dates.
-  startDate: customfield_10015
+  # rather than silently dropping your start dates. Commented out here so a
+  # guessed id is never used by accident.
+  # startDate: customfield_10015
 
-  # Story points, or whatever you decided `estimate` means.
-  estimate: customfield_10016
+  # Story points, or whatever you decided `estimate` means. Also commented out
+  # until looked up: team-managed and company-managed projects use different
+  # fields for it.
+  # estimate: customfield_10016
 
   # Only needed on older company-managed projects that still use the Epic Link
   # field instead of the modern `parent` field.
@@ -64,11 +81,33 @@ fields:
   # to fold it into labels (spaces become hyphens), or a customfield id.
   category: labels
 
-# Fields your instance marks as required on the create screen. Anything here is
-# merged into every issue. A required "Team" or "Reporter" field usually lives
-# here.
+# People, as the vault spells them, to Jira accounts. Jira Cloud identifies a
+# person by account id, never by name, so an assignee with no entry here is
+# pushed unassigned (and the push says so). Settings → Jira fills this in by
+# searching the people who can be assigned in the project. Names are matched
+# case-insensitively.
+people: {}
+#  dan okafor: { accountId: "5b10ac8d82e05b22cc7d4ef5", displayName: "Dan Okafor" }
+
+# Jira fields the vault has no equivalent for, and what to send in them. Values
+# are written already in the shape Jira's create API takes, by id where Jira
+# offers one. "always" sends the value on every issue; "ask" offers it, prefilled,
+# in the push pane, where it can be changed for that one push. issueTypes limits
+# a field to the issue types whose create screen has it.
+extraFields: {}
+#  customfield_10001:
+#    name: Team
+#    mode: always
+#    value: "36885b3c-1bf0-4f85-a357-c5b858c31de4"
+#  fixVersions:
+#    name: Fix versions
+#    mode: ask
+#    value: [{ id: "10021" }]
+#    issueTypes: [Story, Bug]
+
+# The older form of extraFields: sent on every issue, no names, no asking.
+# Still read; Settings → Jira offers to move these into extraFields.
 defaults: {}
-#  customfield_10001: { id: "team-uuid-here" }
 
 # Local status -> Jira transition name. Issues are created in the project's
 # default status, so anything not starting in "To Do" needs a transition applied

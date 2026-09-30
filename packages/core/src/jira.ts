@@ -1,12 +1,15 @@
 import { promises as fs } from "node:fs";
+import path from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
 
 import { parseDescription, type Block, type Inline } from "./description.js";
+import { JIRA_MAP_TEMPLATE } from "./jira-map-template.js";
+import { fieldOn, issueTypeNamed, requiredGaps, type ProjectMeta } from "./jira-meta.js";
 import type { Item } from "./schema.js";
 import type { Vault } from "./vault.js";
 import { pushableFields } from "./vault.js";
-import { contentHash, formatZodError } from "./util.js";
+import { contentHash, formatZodError, writeFileAtomic } from "./util.js";
 
 /**
  * One-way push to Jira.
@@ -51,12 +54,55 @@ export const JiraMapSchema = z
           .describe("'labels' to fold category into labels, or a customfield_NNNNN id"),
       })
       .default({ category: "labels" }),
-    /** Fields your instance marks as required on the create screen. */
+    /**
+     * `site` sends a classic API token to `baseUrl`; `scoped` sends a scoped
+     * token through Atlassian's gateway, which needs `cloudId`. See
+     * `jira-client.ts`. The credential itself is never in this file.
+     */
+    auth: z.enum(["site", "scoped"]).default("site"),
+    cloudId: z.string().optional(),
+    /**
+     * Vault people, as the vault spells them, to Jira accounts. Jira Cloud
+     * takes `{ accountId }` for every user field and has not accepted a name
+     * since 2019, so an assignee with no entry here is pushed unassigned.
+     * Keys are matched case-insensitively, as `listItems` matches people.
+     */
+    people: z
+      .record(z.object({ accountId: z.string().min(1), displayName: z.string().optional() }).strict())
+      .default({}),
+    /**
+     * Jira fields with no vault equivalent, keyed by field id. `value` is stored
+     * already in the shape Jira's create API takes. `always` sends it on every
+     * issue; `ask` offers it, prefilled, in the push pane for that push only.
+     * `issueTypes` limits the field to the types whose create screen has it.
+     */
+    extraFields: z
+      .record(
+        z
+          .object({
+            name: z.string().optional(),
+            mode: z.enum(["always", "ask"]).default("always"),
+            value: z.unknown(),
+            issueTypes: z.array(z.string()).optional(),
+          })
+          .strict(),
+      )
+      .default({}),
+    /** The older form of `extraFields`: always sent, no names. Still read. */
     defaults: z.record(z.unknown()).default({}),
     /** Local statuses to Jira transition names, applied after creation. */
     statusTransitions: z.record(z.string()).default({}),
   })
-  .strict();
+  .strict()
+  .superRefine((map, ctx) => {
+    if (map.auth === "scoped" && !map.cloudId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["cloudId"],
+        message: "auth: scoped needs the site's cloudId (Settings → Jira looks it up)",
+      });
+    }
+  });
 
 export type JiraMap = z.infer<typeof JiraMapSchema>;
 
@@ -74,6 +120,70 @@ export async function loadJiraMap(filePath: string): Promise<JiraMap> {
   } catch (err) {
     throw new Error(`Jira mapping is invalid: ${formatZodError(err)}`);
   }
+}
+
+/** Where a vault keeps its map. */
+export function jiraMapPath(vaultRoot: string): string {
+  return path.join(vaultRoot, "jira-map.yaml");
+}
+
+/**
+ * One change to the map: set the value at `path`, or remove it when `value` is
+ * `undefined`. Paths rather than a whole object, because a whole-object write
+ * replaces a block and the comments inside it go with it.
+ */
+export interface JiraMapEdit {
+  path: readonly (string | number)[];
+  value: unknown;
+}
+
+/**
+ * Apply edits to `jira-map.yaml` without losing a comment.
+ *
+ * `discover` refuses to write this file, and the reason was right for the
+ * writer it had in mind: parse, change, reserialise, and every comment that
+ * makes the example readable is gone. `YAML.parseDocument` keeps the comments
+ * attached to the nodes they describe and edits values in place, so this
+ * writer changes only what it is told to. A missing file starts from
+ * `JIRA_MAP_TEMPLATE`, the example's own text, so a first-time user gets the
+ * explanations too.
+ *
+ * The result is validated against `JiraMapSchema` *before* anything touches
+ * disk, and a refusal names the field. The schema is `.strict()`, so an edit
+ * that invents a key — `token`, say — is refused outright: the credential is
+ * never in this file, and this is where that stays true.
+ *
+ * Returns the parsed map as written. Committing is the caller's business;
+ * `Vault.commitChange` is how the app does it.
+ */
+export async function writeJiraMap(filePath: string, edits: readonly JiraMapEdit[]): Promise<JiraMap> {
+  let text: string;
+  try {
+    text = await fs.readFile(filePath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    text = JIRA_MAP_TEMPLATE;
+  }
+
+  const doc = YAML.parseDocument(text);
+  if (doc.errors.length) {
+    throw new Error(`jira-map.yaml is not valid YAML, so it was left alone: ${doc.errors[0].message}`);
+  }
+  for (const edit of edits) {
+    if (edit.path.length === 0) throw new Error("A map edit needs a path.");
+    if (edit.value === undefined) doc.deleteIn(edit.path);
+    else doc.setIn(edit.path, edit.value);
+  }
+
+  const next = String(doc);
+  let map: JiraMap;
+  try {
+    map = JiraMapSchema.parse(YAML.parse(next));
+  } catch (err) {
+    throw new Error(`That change would make jira-map.yaml invalid, so it was not saved: ${formatZodError(err)}`);
+  }
+  await writeFileAtomic(filePath, next);
+  return map;
 }
 
 // ------------------------------------------------------- markdown to ADF
@@ -310,9 +420,17 @@ function resolveStartDate(
 
 export interface JiraIssueDraft {
   localKey: string;
+  /** The Jira issue type name this draft creates, for showing in the push pane. */
+  issueType: string;
   /** Set when this issue's parent is also in this batch and must be created first. */
   parentLocalKey?: string;
   fields: Record<string, unknown>;
+}
+
+/** Something that stops an issue being created at all, as opposed to a warning about how. */
+export interface JiraPushBlocker {
+  localKey: string;
+  message: string;
 }
 
 export interface JiraPushPlan {
@@ -321,25 +439,97 @@ export interface JiraPushPlan {
   drafts: JiraIssueDraft[];
   attachments: Array<{ localKey: string; paths: string[] }>;
   skipped: Array<{ localKey: string; reason: string }>;
+  /** "This will send, and here is what you might not expect." */
   warnings: string[];
+  /**
+   * "This will not send." An issue type the project cannot create, or a field
+   * Jira requires that nothing fills. Only found when `meta` is given; the push
+   * refuses a batch with any blocker in it and names each one.
+   */
+  blockers: JiraPushBlocker[];
 }
 
-export function buildPushPlan(items: Item[], map: JiraMap, vault: Vault): JiraPushPlan {
+export interface PushPlanOptions {
+  /**
+   * The target project's create metadata. When given, each draft is checked
+   * against its own issue type's create screen: fields that type does not have
+   * are dropped with a warning, required fields nothing fills become blockers,
+   * and the issue type is sent by id rather than by name. Without it the plan is
+   * built the way it always was, which is what the MCP planner and the CLI get.
+   */
+  meta?: ProjectMeta;
+  /** Values chosen in the push pane for `ask` extra fields, by field id. This push only. */
+  askValues?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Checked against the create screen by nothing: `project` and `issuetype`
+ * identify the create itself, and `parent` is how a subtask or a child is
+ * placed, which Jira does not reliably list as a screen field.
+ */
+const NOT_SCREEN_FIELDS: ReadonlySet<string> = new Set(["project", "issuetype", "parent"]);
+
+/** A person's Jira account, by the vault's spelling of their name, case-folded. */
+function accountFor(map: JiraMap, person: string): { accountId: string } | undefined {
+  const wanted = person.trim().toLowerCase();
+  for (const [name, entry] of Object.entries(map.people)) {
+    if (name.trim().toLowerCase() === wanted) return { accountId: entry.accountId };
+  }
+  return undefined;
+}
+
+/**
+ * The same warning for many items, said once with the keys listed. A batch of
+ * forty items with no Start date field on Epic would otherwise print forty
+ * lines that differ only in a key, and bury the one warning that matters.
+ */
+class GroupedWarnings {
+  private readonly groups = new Map<string, string[]>();
+  add(message: string, key: string): void {
+    const keys = this.groups.get(message) ?? [];
+    keys.push(key);
+    this.groups.set(message, keys);
+  }
+  into(out: string[]): void {
+    for (const [message, keys] of this.groups) out.push(`${message} (${keys.join(", ")})`);
+  }
+}
+
+export function buildPushPlan(
+  items: Item[],
+  map: JiraMap,
+  vault: Vault,
+  options: PushPlanOptions = {},
+): JiraPushPlan {
   const { eligible, skipped, warnings } = selectPushable(items);
   const selected = new Map(items.map((i) => [i.key, i]));
   const ordered = orderForCreation(eligible);
+  const { meta, askValues = {} } = options;
 
   const drafts: JiraIssueDraft[] = [];
   const attachments: Array<{ localKey: string; paths: string[] }> = [];
+  const blockers: JiraPushBlocker[] = [];
+  const grouped = new GroupedWarnings();
 
   for (const item of ordered) {
-    const fields: Record<string, unknown> = {
-      ...map.defaults,
+    const issueType = map.issueTypes[item.type];
+
+    // Extra fields first, so everything the vault itself knows about the item
+    // is written over them: an extra field named `priority` must not beat the
+    // item's own priority. `defaults` first of all, being the older form.
+    const fields: Record<string, unknown> = { ...map.defaults };
+    for (const [fieldId, spec] of Object.entries(map.extraFields)) {
+      if (spec.issueTypes && !spec.issueTypes.some((t) => t.toLowerCase() === issueType.toLowerCase())) continue;
+      const value = spec.mode === "ask" && fieldId in askValues ? askValues[fieldId] : spec.value;
+      if (value !== undefined && value !== null) fields[fieldId] = value;
+    }
+
+    Object.assign(fields, {
       project: { key: map.jiraProjectKey },
-      issuetype: { name: map.issueTypes[item.type] },
+      issuetype: { name: issueType },
       summary: item.summary,
       description: markdownToAdf(buildDescription(item, vault)),
-    };
+    });
 
     const priority = map.priorities[item.priority];
     if (priority) fields.priority = { name: priority };
@@ -350,7 +540,19 @@ export function buildPushPlan(items: Item[], map: JiraMap, vault: Vault): JiraPu
     if (item.components.length) {
       fields.components = item.components.map((name) => ({ name }));
     }
-    if (item.assignee) fields.assignee = { name: item.assignee };
+    if (item.assignee) {
+      // Jira Cloud identifies people by account id and has refused `{ name }`
+      // since 2019, so a name with no account is left unassigned and said so,
+      // rather than sent and refused.
+      const account = accountFor(map, item.assignee);
+      if (account) fields.assignee = account;
+      else {
+        grouped.add(
+          `"${item.assignee}" has no Jira account in jira-map.yaml's people, so these are created unassigned`,
+          item.key,
+        );
+      }
+    }
     if (item.dueDate) fields.duedate = item.dueDate;
 
     const startDate = resolveStartDate(item, map);
@@ -360,7 +562,7 @@ export function buildPushPlan(items: Item[], map: JiraMap, vault: Vault): JiraPu
       fields[map.fields.estimate] = item.estimate;
     }
 
-    const draft: JiraIssueDraft = { localKey: item.key, fields };
+    const draft: JiraIssueDraft = { localKey: item.key, issueType, fields };
 
     if (item.parent) {
       const parentItem = selected.get(item.parent) ?? safeGet(vault, item.parent);
@@ -376,6 +578,8 @@ export function buildPushPlan(items: Item[], map: JiraMap, vault: Vault): JiraPu
       }
     }
 
+    if (meta) checkAgainstScreen(item, draft, meta, blockers, grouped);
+
     drafts.push(draft);
 
     if (item.attachments.length) {
@@ -386,7 +590,59 @@ export function buildPushPlan(items: Item[], map: JiraMap, vault: Vault): JiraPu
     }
   }
 
-  return { jiraProjectKey: map.jiraProjectKey, drafts, attachments, skipped, warnings };
+  grouped.into(warnings);
+  return { jiraProjectKey: map.jiraProjectKey, drafts, attachments, skipped, warnings, blockers };
+}
+
+/**
+ * Hold one draft up against its issue type's create screen in the target project.
+ *
+ * Per issue type, never a union: a field can be required on Story and absent
+ * from Epic. Three outcomes. A field the screen does not have is removed — Jira
+ * would refuse the whole create over it — and the removal is a warning, since
+ * the rest of the issue is still worth creating. A required field with no
+ * default that nothing fills is a blocker. And the issue type goes by id, which
+ * survives the type being renamed between setup and push.
+ */
+function checkAgainstScreen(
+  item: Item,
+  draft: JiraIssueDraft,
+  meta: ProjectMeta,
+  blockers: JiraPushBlocker[],
+  grouped: GroupedWarnings,
+): void {
+  const type = issueTypeNamed(meta, draft.issueType);
+  if (!type) {
+    blockers.push({
+      localKey: item.key,
+      message: `${item.key} is a ${item.type}, mapped to "${draft.issueType}", which ${meta.projectKey} cannot create. It can create: ${meta.issueTypes.map((t) => t.name).join(", ")}.`,
+    });
+    return;
+  }
+  if (type.fields.length === 0) {
+    blockers.push({
+      localKey: item.key,
+      message: `The fields of ${meta.projectKey}'s ${type.name} issue type were not loaded, so ${item.key} cannot be checked. Refresh the project's fields in Settings → Jira.`,
+    });
+    return;
+  }
+
+  draft.fields.issuetype = { id: type.id };
+
+  for (const fieldId of Object.keys(draft.fields)) {
+    if (NOT_SCREEN_FIELDS.has(fieldId) || fieldOn(type, fieldId)) continue;
+    delete draft.fields[fieldId];
+    grouped.add(`${meta.projectKey}'s ${type.name} has no ${fieldId} field, so it is not sent`, item.key);
+  }
+
+  const covered = new Set(Object.keys(draft.fields));
+  if (draft.parentLocalKey) covered.add("parent");
+  for (const gap of requiredGaps(type, covered)) {
+    blockers.push({
+      localKey: item.key,
+      message: `${item.key} (${type.name}) needs ${gap.name} (${gap.fieldId}), which Jira requires and nothing fills in. Set it in Settings → Jira, or give the item a value for it.`,
+    });
+  }
 }
 
 /**

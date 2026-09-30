@@ -3764,3 +3764,83 @@ email in plain text, so `safeStorage` really encrypted it on this machine.
 Status over IPC is exactly the summary. Replace keeps site and email and
 empties the token. Remove deletes the file. Not verified: any request to
 Jira. B1 makes none, by design.
+
+## The Jira map is written by the app, and checked against the project ✅ built (Jira push, slice A2)
+
+The second core slice of `plans/PLAN-jira-push.md`. It adds the parts of
+`jira-map.yaml` that Settings → Jira fills in, a writer that can fill them in
+without destroying the file, and a planner that checks every draft against what
+the target project will actually accept.
+
+**The map gains four keys, all optional:** `auth` and `cloudId` for scoped
+tokens, `people`, and `extraFields`. A map written before this still loads.
+The schema stays `.strict()`, and a `superRefine` refuses `auth: scoped` without
+a `cloudId`.
+
+**`writeJiraMap` keeps every comment.** `discover` refuses to write this file,
+because parse-and-reserialise would destroy the explanations that make it
+usable. That was right for that kind of writer. `YAML.parseDocument` instead
+edits values in place with their comments still attached, so the writer takes
+path-level edits and changes only those paths:
+- **Paths, not objects.** Replacing the whole `fields` block would take its
+  comments with it.
+- **Validated before disk.** An edit that would make the map invalid is refused,
+  and the file is left byte-for-byte as it was.
+- **No place for a secret.** Strictness means an invented key such as `token` is
+  refused at any depth.
+- **Committed like other writes.** `Vault.commitChange` lets the app's save land
+  in git beside every other write.
+
+**A first write starts from the example's own text.** The example is embedded as
+`JIRA_MAP_TEMPLATE`, so a packaged app, which has no repo to read the example
+from, still writes a commented file. `scripts/sync-jira-map-template.ts`
+regenerates it, and a test fails, naming that script, whenever the two differ.
+Building this surfaced a trap in the example: `startDate: customfield_10015` and
+`estimate: customfield_10016` were live values, with a comment saying not to
+trust them. A person copying the file might read that comment. An app writing
+from it would not, and would silently keep a guessed id that is wrong on half of
+all sites. Both are now commented out. An unset start date field produces the
+existing warning, which is the safe failure.
+
+**Assignees go by account id.** Jira Cloud stopped accepting `{ name }` for
+users in 2019, so the old payload was refused for every assigned item.
+`people` maps the vault's spellings, case-folded as `listItems` folds them, to
+`{ accountId }`. A name with no entry is left unassigned, with a warning rather
+than a refusal, because the rest of the issue is still worth creating.
+
+**Extra fields are applied first, and the item's own fields last.** An extra
+field that happens to share an id with a vault field, such as `priority`, must
+not override the item. `ask` fields send their prefilled value unless the push
+pane passes an `askValues` override, which applies to that push only.
+`issueTypes` limits a field to the types that have it.
+
+**With `meta`, each draft is checked against its own issue type.** Never against
+a union, since a field can be required on Story and absent from Epic:
+- A field the screen lacks is **removed, with a warning**, because Jira would
+  refuse the whole create over it and the rest is still worth sending.
+- A required field with no default that nothing fills is a **blocker**, which
+  the push will refuse.
+- An issue type the project cannot create is a blocker, and so is one whose
+  fields were never loaded. A check that cannot run must not pass by default.
+- The issue type is sent **by id**, which survives a rename between setup and
+  push.
+
+A child created in the same batch counts `parent` as covered, because the child
+is filled in once its parent exists.
+
+**Warnings are grouped.** A batch of forty epics on a project whose Epic has no
+labels field would otherwise print forty near-identical lines and bury the one
+that matters. The same message is now said once, with the keys listed.
+
+**Without `meta`, nothing changes.** The MCP planner and the CLI get the plan
+they always got, now with an empty `blockers` list and account-id assignees.
+Only the app, which holds a credential, can fetch the metadata the checks need.
+
+314 tests green (179 core, 91 app, 44 scripts), typecheck clean.
+`jira-map.test.ts` covers the template-equals-example check, the example being
+valid with no live guessed ids, old maps loading, every comment surviving both a
+first write and an in-place edit, refusals leaving the file untouched, and
+`token` being refused at the top level and nested. `jira-push-plan.test.ts`
+covers each outcome above against a hand-built `ProjectMeta`. **Not verified:**
+a real project's metadata has never been fed through the screen checks. The one
+hand-run push in the plan is where that happens.
