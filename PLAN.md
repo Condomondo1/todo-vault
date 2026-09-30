@@ -3616,3 +3616,78 @@ instance. With the exclusive write switched off, the same test fails on
 duplicate keys, so it does exercise the race. With it on, it passed 20 runs out
 of 20 after the counter change; before that change it had failed 6 of 10 on
 `EPERM`.
+
+## The core talks to one Jira project through one client ✅ built (Jira push, slice A1)
+
+The first slice of `plans/PLAN-jira-push.md`, the design for Phase 5. It adds no
+UI. It gives the push, the app's connection check and `discover` a single way to
+talk to Jira, and lets them read what one project will accept.
+
+**One client, because the rules are security rules.** `createJiraClient` in
+`jira-client.ts` is the only thing in the codebase that sends a request to
+Jira. Each of its rules closes a specific way a token leaks, and a second fetch
+path would be a second place to forget each one:
+- `normaliseBaseUrl` *refuses* `http:` rather than upgrading it, because Basic
+  auth over plain HTTP is the token in the clear.
+- Callers pass a path, never a URL. Anything that would resolve outside the
+  site (`//host`, `://`, `..`) is refused before a request is made.
+- Redirects are refused rather than followed, because a redirect carrying
+  `Authorization` to another host is the textbook leak.
+- The Basic header is formatted inside `request` and nowhere else.
+  `JiraError` carries status, path and Jira's own messages, never a header.
+
+The slice-B session asked for the client to land first for exactly this reason.
+Its Test connection button would otherwise have needed a request path of its
+own in the main process.
+
+**`redirect: "manual"`, not the `"error"` the plan named.** Both refuse to
+follow. `"error"` surfaces as an opaque network failure, while `"manual"` hands
+back the 3xx so the message can say a redirect was refused and why. One test
+asserts a single request with no follow, and another that the token is absent
+from the error, the stack and every property of every failure kind.
+
+**A 401 is written as an expiry, not a mystery.** Atlassian API tokens now
+expire (a year at most), so the most likely cause of a 401 on a credential that
+used to work is time. The message says so and says where to replace it. A 429 is
+retried on `Retry-After`, capped at a minute, with a callback so a UI can say
+how long it is waiting.
+
+**Scoped tokens are addressed through the gateway.** A scoped token is sent to
+`https://api.atlassian.com/ex/jira/{cloudId}`, not the site. `resolveCloudId`
+reads `/_edge/tenant_info`, which is unauthenticated on purpose, so it sends no
+credential at all. The client keeps the site separately, for links a person
+clicks.
+
+**Project metadata, read per project and per issue type.** `jira-meta.ts` reads
+the project, its issue types, and each type's create-screen fields through the
+paginated `createmeta/{project}/issuetypes[/{id}]` endpoints. Everything
+downstream works one issue type at a time, because a field can be required on
+Story and absent from Epic:
+- `requiredGaps`: the required fields with no default that nothing covers.
+- `valueKindFor`: which editor a field needs, with `raw` as the escape hatch for
+  Sprint, Team and app fields whose shapes vary by site.
+- `searchAssignable`: people Jira will accept as an assignee here, active human
+  accounts only.
+
+The renderer can import all of it through the new `todo-vault/jira-meta`
+subpath.
+
+**The list key is read tolerantly, and only that.** Atlassian's current
+reference names the lists `issueTypes` and `fields`. Older documentation and
+some deployments send `values`. Both are accepted, and everything else is
+parsed strictly, so a genuine API change fails at the parse and names the path.
+
+**`discover` moved onto both.** It used to have its own fetch helper, and it
+matched names against `GET /rest/api/3/field`, which lists every field on the
+*site*. That could propose a field this project's create screen does not have,
+which Jira then rejects at create time. It also read the deprecated
+`createmeta?expand=projects.issuetypes.fields`. Now it matches against the
+project's own fields, through the client. It is still a printer: writing the map
+is slice A2's comment-preserving writer.
+
+291 tests green (162 core, 85 app, 44 scripts), typecheck clean. The fake
+`fetch` in `test/jira-fake-fetch.ts` records every request, so the rules above
+are asserted on what was actually sent. **Not verified:** nothing here has
+talked to a real Jira. Which list key a live site sends, and whether
+`/_edge/tenant_info` answers for every Cloud site, are exactly what the one
+hand-run check in the plan is for.

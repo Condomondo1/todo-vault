@@ -467,8 +467,9 @@ export JIRA_TOKEN=...        # an API token from id.atlassian.com
 npm run vault -- jira discover --url https://yoursite.atlassian.net --project ENG --vault ./vault
 ```
 
-It reads `GET /rest/api/3/field` and the create metadata for that project, then
-prints a YAML fragment to paste into `jira-map.yaml`, annotated with the name
+It reads that one project's create metadata (its issue types, and the fields
+each one's create screen offers), so a field that exists elsewhere on your site
+but not on this project is never proposed. It then prints a YAML fragment to paste into `jira-map.yaml`, annotated with the name
 each id had on your instance so you can check the guess rather than trust a
 number. It does not write the file — `jira-map.yaml` is nine tenths comments
 explaining what each value is for, and merging into it would mean reserialising

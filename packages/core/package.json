@@ -25,6 +25,10 @@
       "types": "./dist/history.d.ts",
       "default": "./dist/history.js"
     },
+    "./jira-meta": {
+      "types": "./dist/jira-meta.d.ts",
+      "default": "./dist/jira-meta.js"
+    },
     "./link-target": {
       "types": "./dist/link-target.d.ts",
       "default": "./dist/link-target.js"
