@@ -4009,3 +4009,59 @@ then stored encrypted, and the account is named. Test connection sends one
 more authorized `/myself`. Replace keeps the site and email. Remove deletes the
 file. Not verified: a real Jira Cloud site, and the scoped-token scope names.
 Both stay on the plan's list for the manual check before slice C is done.
+
+## A push lands in a fake Jira, end to end ✅ built and driven (Jira push, slice C2)
+
+C1 left one sentence standing: *no issue has been created by this code in any
+Jira*. This removes it for a fake one. `e2e/jira-push.e2e.mts` drives the built
+app against the real HTTPS server the slice-B session wrote
+(`e2e/fake-jira.mts`), and checks four things in order:
+1. **The credential goes in through Settings → Jira**, verified against the fake
+   before it is stored. The spec writes the map exactly as the panel will, with
+   `writeJiraMap`.
+2. **An epic and its story, pushed together, are blocked on Team.** The push
+   pane names Team, the button stays disabled, and the fake records no POST.
+3. **Adding Team as an `ask` field clears the blocker.** Choosing *Payments* in
+   the pane, then pressing *Create 2 issues in ENG*, creates the epic first.
+   The story arrives with `parent: { key: <the epic's new key> }`, Team
+   `{ id: "t2" }` (the pane's choice, not the map's default) and assignee
+   `{ accountId }`. Every request carried the stored pair.
+4. **The vault is stamped, and a second push sends nothing.** The vault's files
+   read back as `pushed` with a key and an id. The next push shows *0 issues to
+   create* and *Already pushed as ENG-1*, and makes no new POST.
+
+**One fake project, shared.** `e2e/fake-jira-project.mts` serves an ENG project
+on top of the fake server, so this spec and the mapping panel's spec cannot
+drift into two slightly different Jiras. It is built to catch the mistakes that
+matter:
+- Story requires Team, with no default.
+- Epic has no Start date field.
+- `POST /issue` validates as Jira does, answering a missing Team, a wrong
+  project or a field off the screen with Jira's own `errors` shape.
+
+A payload the planner should have stopped therefore fails loudly here, rather
+than passing because the fake accepted anything.
+
+**`fieldsTheMapCanFill`, for the settings panel.** The slice-B session asked for
+this. Settings → Jira needs to say *"Story requires Team, which nothing fills
+in"* before any item is chosen. That is a question about the map, not about a
+draft, and the rule for what a push fills belongs beside `buildPushPlan`, not
+copied into the renderer:
+- **Generous on item-dependent fields** (due date, assignee, labels, components,
+  parent), so a gap it shows is certain. Gaps that depend on an item are still
+  caught per draft at push time.
+- **Shares `extraFieldAppliesTo`** with the planner, so issue-type matching is
+  one rule.
+- **Held to the planner by a test.** Every field a fully populated item's draft
+  carries must be in the set. Removing `components` from the set makes that
+  test fail and name the field, which was tried to prove the test can fail.
+
+The cast `jira-push.ts` used for a cached cloud id became `stored.cloudId` once
+the credential type grew the field.
+
+329 tests green (189 core, 96 app, 44 scripts), typecheck clean, and the new
+spec's four checks green against the fake. **Not verified:** a real Jira. What
+the fake cannot tell us is which list key a live site sends (`issueTypes` or
+`values`, both accepted), whether a real Team or Sprint field takes what the
+raw-JSON box sends, and the scope names on a real scoped token. That is the
+plan's one hand-run push, and it is the next step.

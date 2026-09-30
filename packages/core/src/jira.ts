@@ -495,6 +495,54 @@ class GroupedWarnings {
   }
 }
 
+/** Whether an extra field is meant for this issue type: unrestricted, or named in `issueTypes`. */
+function extraFieldAppliesTo(spec: JiraMap["extraFields"][string], issueTypeName: string): boolean {
+  const wanted = issueTypeName.trim().toLowerCase();
+  return !spec.issueTypes || spec.issueTypes.some((t) => t.trim().toLowerCase() === wanted);
+}
+
+/**
+ * Every field id some item of this issue type could carry under this map —
+ * the map-level answer to "what does the push fill in?", for Settings → Jira
+ * to hold against `requiredGaps` before any item has been chosen.
+ *
+ * Deliberately generous on the item-dependent fields: `duedate`, `assignee`,
+ * `labels`, `components` and `parent` are counted because *an* item can
+ * carry them, even though a given one may not. So a gap shown here is certain
+ * — nothing under this map can ever fill it — while a gap that depends on the
+ * item, a required due date on an item without one, is still caught per draft
+ * by `buildPushPlan`'s blockers at push time.
+ *
+ * Kept beside `buildPushPlan` and sharing its helpers, with a test that every
+ * field a fully-populated item's draft carries is in this set, so the two
+ * answers cannot drift apart.
+ */
+export function fieldsTheMapCanFill(map: JiraMap, issueTypeName: string): Set<string> {
+  const ids = new Set<string>([
+    "project",
+    "issuetype",
+    "summary",
+    "description",
+    "labels",
+    "components",
+    "assignee",
+    "duedate",
+    "parent",
+  ]);
+  if (Object.values(map.priorities).some(Boolean)) ids.add("priority");
+  if (map.fields.startDate) ids.add(map.fields.startDate);
+  if (map.fields.estimate) ids.add(map.fields.estimate);
+  if (map.fields.category !== "labels") ids.add(map.fields.category);
+  for (const id of Object.keys(map.defaults)) ids.add(id);
+  for (const [id, spec] of Object.entries(map.extraFields)) {
+    // An "always" field with no value sends nothing. An "ask" field can be
+    // given one in the push pane, so it counts.
+    if (!extraFieldAppliesTo(spec, issueTypeName)) continue;
+    if (spec.mode === "ask" || (spec.value !== undefined && spec.value !== null)) ids.add(id);
+  }
+  return ids;
+}
+
 export function buildPushPlan(
   items: Item[],
   map: JiraMap,
@@ -519,7 +567,7 @@ export function buildPushPlan(
     // item's own priority. `defaults` first of all, being the older form.
     const fields: Record<string, unknown> = { ...map.defaults };
     for (const [fieldId, spec] of Object.entries(map.extraFields)) {
-      if (spec.issueTypes && !spec.issueTypes.some((t) => t.toLowerCase() === issueType.toLowerCase())) continue;
+      if (!extraFieldAppliesTo(spec, issueType)) continue;
       const value = spec.mode === "ask" && fieldId in askValues ? askValues[fieldId] : spec.value;
       if (value !== undefined && value !== null) fields[fieldId] = value;
     }
