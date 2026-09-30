@@ -3454,3 +3454,94 @@ overwrites it anyway.
 **Not verified:** the change is skill prose only. No capture has been run
 against a live vault with the new text, so whether it produces the worked
 example's draft in practice is untested.
+
+## History turns on from a button ✅ built and driven
+
+Setting up history used to be a manual sequence nobody should have to know:
+copy in a `.gitattributes`, `git init`, add, commit, and, the step that
+actually bites, have a `user.name` and `user.email` configured first. Miss the
+identity and `git add` succeeds while `git commit` fails, and `commit()`
+swallows that by design. Every write lands and none is committed. The banner
+in `App.tsx` already diagnosed this correctly. What was missing was anything to
+click.
+
+**The work is a core method, `Vault.turnOnHistory`, not desktop code.**
+Everything it does is git plus the vault root, which is what the core already
+owns. It also has to clear `lastCommitError`, which is private to `Vault` for
+good reason. And a method there can be reached from the CLI or MCP later
+without copying the sequence. The desktop side is one IPC channel,
+`vault:turn-on-history`, the first git *write* across the boundary. It runs
+through `VaultService.write` like any other mutation, because its
+`git add -A` would otherwise race an auto-commit for `index.lock`, the same
+contention measured in "One launch, one window".
+
+**The order is the spec, and each step is where it is for a reason:**
+
+1. *Identity before `git init`.* Checked with `git config --get` at every
+   level. If it is missing, the method returns `needs-identity` before writing
+   anything, so the user is never left with a repo that has no way to commit.
+   The check is strict on purpose: some git builds invent `user@host` when
+   nothing is set, and a history signed that way is not one anybody chose. A
+   name and email supplied by the user are written as **repo-local** config.
+   Changing who the user is in every other repository on the machine is not
+   this app's business.
+2. *`.gitattributes` (`* text eol=lf`) before the first `git add`.* Otherwise
+   Windows stages CRLF against the LF the vault writes, and every file diffs
+   as wholly modified. It is written only when absent. A user's own attributes
+   file is left exactly as it was.
+3. *Verify by doing.* `healthy` only goes false after a commit has already
+   failed, so a fresh repo looks healthy either way. The method makes a
+   `Turn on history` commit and reads it back from `git log` before it
+   reports `done`. `--allow-empty` is what lets the same proof cover the other
+   repair: a repo that exists, has nothing new to stage, and was failing to
+   commit for want of an identity.
+
+**Explain rather than act, and the outcomes are values, not errors.**
+`no-git`, `nested` and `needs-identity` come back as `ok: true` results,
+because each is the user's next step rather than a failure. Only a real git
+error is `ok: false`, and it is shown next to the button rather than in the
+shared error banner. With no git, the banner says so and offers **Get git**
+(the download page) plus a note to restart the app afterwards, since a running
+process never sees a `PATH` change. There is no setup button, because there is
+nothing for one to do. For a vault inside a repo that ignores it, the banner
+names the outer repo and the button reads **Keep a separate history here**. The
+nesting is allowed, but only as a labelled choice (`allowNested`), never as the
+side effect of a button labelled "Fix".
+
+**The identity form appears only after main has looked.** Asking every user
+for a name and email up front would ask everyone who already has one
+configured, which is most people. The first click either finishes or comes
+back `needs-identity`, and only then do the two fields appear inline in the
+banner. At the 900px minimum width the controls wrap under the sentence
+(`.banner-history`) instead of squeezing it to a column one word wide. That was
+caught in a screenshot, not predicted.
+
+**The first-run offer is a checkbox on the "Create a vault here" dialog, not a
+button in `Welcome.tsx`.** IDEAS.md said to offer it "at the first-run picker
+once a folder is chosen". The Welcome screen never sees that moment: choosing a
+folder either opens a vault, and the app replaces Welcome at once, or reaches
+main's "Not a vault yet" message box. That box is the one place where someone
+is deciding how a new vault gets set up, so it gained a checkbox, *Keep an undo
+history with git*, ticked by default and shown only when git runs at all.
+Anything short of `done` there (typically no identity) falls through to the
+banner, which has room for the two fields and the explanation a message box
+does not. An existing vault opened from Welcome gets the banner too. So every
+first-run path ends in front of the same button, with no second implementation
+of it.
+
+Verified in `packages/core/test/vault.test.ts` (six cases) and
+`e2e/turn-on-history.e2e.mts`. Both run git with `GIT_CONFIG_GLOBAL` pointed at
+an empty file and `GIT_CONFIG_NOSYSTEM` set, because otherwise "no identity"
+is only true on a machine that never configured one, and the suite would test
+different paths on a developer's laptop and a CI runner. The core cases cover:
+nothing written before the identity check; the full sequence ending healthy
+with the next auto-commit landing; a failing repo repaired and its error
+cleared; nesting refused and then done on request; an existing
+`.gitattributes` untouched and a bad email rejected; and `no-git` with an empty
+`PATH`. The e2e spec drives the banner from *not a git repository* through the
+form to *history on*, then checks the repo: one `Turn on history` commit,
+repo-local identity, the attributes file, a clean tree, and the next write
+committed as `Update <key>`. The harness gained `git: false` and `env` options
+for it. Not driven in a real window: the dialog checkbox (a native message box
+Playwright cannot click), the Get git button, and the nested banner. The core
+tests cover the logic under all three.

@@ -11,6 +11,8 @@ import type {
   Project,
   Status,
   TrashEntry,
+  TurnOnHistoryOptions,
+  TurnOnHistoryResult,
   UpdateItemInput,
   UpdateProjectInput,
 } from "todo-vault";
@@ -238,6 +240,16 @@ export interface VaultApi {
   removeLink(key: string, target: string): Promise<Result<VaultSnapshot>>;
 
   /**
+   * The one git *write* across this boundary: set history up for the open vault
+   * and prove a commit lands. Every outcome but `done` is a situation to explain
+   * (no git, an ignoring outer repo, no identity yet) rather than an error, so
+   * those come back as values and only a genuine git failure is `ok: false`.
+   */
+  turnOnHistory(
+    options: TurnOnHistoryOptions,
+  ): Promise<Result<{ result: TurnOnHistoryResult; snapshot: VaultSnapshot }>>;
+
+  /**
    * Opens a native file picker in main, then attaches what was chosen.
    *
    * "Copy in" here is an explicit choice, so a file inside a OneDrive folder
@@ -371,6 +383,7 @@ export const CHANNELS = {
   moveProject: "vault:move-project",
   hideProject: "vault:hide-project",
   unhideProject: "vault:unhide-project",
+  turnOnHistory: "vault:turn-on-history",
 
   // Neither `vault:` nor `claude:` — the theme is a property of this machine's
   // app window and says nothing about what is open in it.

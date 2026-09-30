@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { TurnOnHistoryResult } from "todo-vault";
 import type { MaybeSnapshot, Result, VaultApi, VaultSnapshot } from "@shared/api";
 
 /**
@@ -83,6 +84,16 @@ export interface VaultState {
     copy: boolean,
   ) => Promise<{ error: string | null; linkedInstead: string[] }>;
   restore: (files: string[]) => Promise<void>;
+  /**
+   * Set git up for the open vault. A helper rather than `mutate` because the
+   * outcome is the point: `needs-identity` and `nested` are not failures, they
+   * are the banner's cue to ask for two fields or explain a choice. A real
+   * failure stays out of the shared error banner, so it can be shown next to
+   * the button that caused it.
+   */
+  turnOnHistory: (
+    options: Parameters<VaultApi["turnOnHistory"]>[0],
+  ) => Promise<{ error: string | null; result: TurnOnHistoryResult | null }>;
   /** Selects the item created by the last successful createItem, if any. */
   lastCreated: string | null;
 }
@@ -263,6 +274,25 @@ export function useVault(): VaultState {
     }
   }, []);
 
+  const turnOnHistory = useCallback(
+    async (options: Parameters<VaultApi["turnOnHistory"]>[0]) => {
+      setBusy(true);
+      try {
+        const result = await window.vault.turnOnHistory(options);
+        if (!result.ok) return { error: result.message, result: null };
+        generation.current += 1;
+        setError(null);
+        setSnapshot(result.value.snapshot);
+        return { error: null, result: result.value.result };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err), result: null };
+      } finally {
+        setBusy(false);
+      }
+    },
+    [],
+  );
+
   const restore = useCallback(async (files: string[]) => {
     setBusy(true);
     try {
@@ -301,6 +331,7 @@ export function useVault(): VaultState {
       updateItems,
       attachPaths,
       restore,
+      turnOnHistory,
       lastCreated,
     }),
     [
@@ -318,6 +349,7 @@ export function useVault(): VaultState {
       updateItems,
       attachPaths,
       restore,
+      turnOnHistory,
     ],
   );
 }

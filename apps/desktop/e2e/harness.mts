@@ -78,6 +78,17 @@ export interface LaunchOptions {
    * to `emulateMedia`.
    */
   colorScheme?: null | "light" | "dark" | "no-preference";
+  /**
+   * `false` seeds a vault that is not a git repository, for driving the "no
+   * undo history" banner. Defaults to a repo with a local identity, for the
+   * reason `initVaultGit` gives.
+   */
+  git?: boolean;
+  /**
+   * Merged over the inherited environment. For pointing the app's git at an
+   * empty `GIT_CONFIG_GLOBAL`, so "no identity" is true on a machine that has one.
+   */
+  env?: Record<string, string>;
 }
 
 /** Spawns a command with a real argv (never a shell) and waits for a clean exit. */
@@ -212,7 +223,7 @@ export async function launchHarness(options: LaunchOptions = {}): Promise<Harnes
   // the very thing a relaunch exists to read back.
   if (!relaunch) {
     await seedVault(vaultRoot);
-    await initVaultGit(vaultRoot);
+    if (options.git !== false) await initVaultGit(vaultRoot);
     await writeSettings(userDataDir, vaultRoot, options.settings ?? {});
   }
 
@@ -227,6 +238,7 @@ export async function launchHarness(options: LaunchOptions = {}): Promise<Harnes
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined && key !== "ELECTRON_RENDERER_URL") env[key] = value;
   }
+  Object.assign(env, options.env);
 
   const app = await electron.launch({
     executablePath,

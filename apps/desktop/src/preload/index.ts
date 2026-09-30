@@ -42,6 +42,7 @@ const api: VaultApi = {
   moveProject: (key, position) => ipcRenderer.invoke(CHANNELS.moveProject, key, position),
   hideProject: (key) => ipcRenderer.invoke(CHANNELS.hideProject, key),
   unhideProject: (key) => ipcRenderer.invoke(CHANNELS.unhideProject, key),
+  turnOnHistory: (options) => ipcRenderer.invoke(CHANNELS.turnOnHistory, options),
 
   // The key goes one way only: there is deliberately no getClaudeKey here, so
   // nothing in the renderer can read back what was stored.

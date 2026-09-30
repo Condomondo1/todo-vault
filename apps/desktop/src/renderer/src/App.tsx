@@ -11,6 +11,7 @@ import { Board } from "./Board";
 import { Agenda } from "./Agenda";
 import { Calendar } from "./CalendarView";
 import { History } from "./History";
+import { HistorySetup } from "./HistorySetup";
 import { ItemDetail } from "./ItemDetail";
 import { Welcome } from "./Welcome";
 import { CreateDialog } from "./CreateDialog";
@@ -1282,16 +1283,29 @@ export function App(): React.JSX.Element {
         )}
 
         {!snapshot.git.healthy && (
-          <div className="banner banner-info">
+          <div className="banner banner-info banner-history">
             <span style={{ flex: 1 }}>
               Writes are not being committed, so there is no undo history.{" "}
-              {snapshot.git.ignored
-                ? "The repository this vault sits in ignores it."
-                : snapshot.git.isRepo
-                  ? snapshot.git.lastError
-                  : "The vault folder is not a git repository."}{" "}
+              {!snapshot.git.gitAvailable ? (
+                "Git is not installed, or not on this app's PATH."
+              ) : snapshot.git.ignored ? (
+                <>
+                  The repository at <code>{snapshot.git.repoRoot}</code> ignores this vault. A
+                  separate history here would be a second repository inside that one, which may be
+                  what you want.
+                </>
+              ) : snapshot.git.isRepo ? (
+                snapshot.git.lastError
+              ) : (
+                "The vault folder is not a git repository."
+              )}{" "}
               Deletes still go to <code>.trash</code> and stay recoverable.
             </span>
+            <HistorySetup
+              git={snapshot.git}
+              busy={vault.busy}
+              turnOnHistory={vault.turnOnHistory}
+            />
           </div>
         )}
 

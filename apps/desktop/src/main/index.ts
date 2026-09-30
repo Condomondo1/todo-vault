@@ -1,8 +1,14 @@
+import { execFile } from "node:child_process";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
-import { formatZodError, type HistoryQuery, type Status } from "todo-vault";
+import {
+  formatZodError,
+  type HistoryQuery,
+  type Status,
+  type TurnOnHistoryOptions,
+} from "todo-vault";
 import {
   CHANNELS,
   type AgendaScope,
@@ -208,6 +214,13 @@ function createWindow(): void {
     });
 }
 
+/** Whether `git` runs at all. Never throws. */
+function gitOnPath(): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile("git", ["--version"], (err) => resolve(!err));
+  });
+}
+
 /**
  * The example vault in the repo, offered as a starting point on first run so the
  * app has something real in it immediately.
@@ -246,6 +259,11 @@ function registerHandlers(): void {
 
     // Not a vault. Offer to make one rather than dead-ending on an error.
     const empty = await VaultService.isEmptyish(root);
+    // History is offered here because this is the moment someone is thinking
+    // about setting anything up. The checkbox is left off when git is missing,
+    // rather than offered and left to fail. The banner explains that case
+    // once the vault is open.
+    const offerHistory = await gitOnPath();
     const choice = await dialog.showMessageBox({
       type: "question",
       title: "Not a vault yet",
@@ -256,12 +274,26 @@ function registerHandlers(): void {
       buttons: ["Create a vault here", "Cancel"],
       defaultId: 0,
       cancelId: 1,
+      ...(offerHistory
+        ? { checkboxLabel: "Keep an undo history with git", checkboxChecked: true }
+        : {}),
     });
     if (choice.response !== 0) return null;
 
-    const snapshot = await service.init(root);
+    await service.init(root);
     await rememberVault(root);
-    return snapshot;
+    if (offerHistory && choice.checkboxChecked) {
+      // Anything short of `done` (no identity yet, or an ignoring outer repo)
+      // shows up as the banner, which offers the same action with room for the
+      // two fields and the explanation a message box has no space for. A
+      // failure here must not undo the vault that was just made.
+      try {
+        await service.turnOnHistory({});
+      } catch (err) {
+        console.error("[main] turning on history for a new vault failed:", err);
+      }
+    }
+    return service.snapshot();
   });
 
   handle<[string], MaybeSnapshot>(CHANNELS.openVault, async (root) => {
@@ -411,6 +443,11 @@ function registerHandlers(): void {
   handle(CHANNELS.unhideProject, async (key: string) => {
     await service.unhideProject(key);
     return service.snapshot();
+  });
+
+  handle(CHANNELS.turnOnHistory, async (options: TurnOnHistoryOptions) => {
+    const result = await service.turnOnHistory(options ?? {});
+    return { result, snapshot: await service.snapshot() };
   });
 
   // --------------------------------------------------------- optional Claude

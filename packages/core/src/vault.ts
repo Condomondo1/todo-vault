@@ -174,6 +174,33 @@ export interface GitStatus {
   healthy: boolean;
 }
 
+export interface TurnOnHistoryOptions {
+  /**
+   * Written as repo-local config, never global: the app has no business
+   * changing who the user is in every other repository on the machine.
+   */
+  identity?: { name: string; email: string };
+  /**
+   * Go ahead and start a repo of the vault's own inside an outer repo that
+   * ignores it. Never the default. That nesting may be exactly what the user
+   * wants, but it should be chosen, not come about as a side effect of a click.
+   */
+  allowNested?: boolean;
+}
+
+/**
+ * Every outcome but `done` is something to explain rather than a failure,
+ * because each one is a situation where the next step is the user's to take.
+ */
+export type TurnOnHistoryResult =
+  | { outcome: "no-git" }
+  | { outcome: "nested"; repoRoot: string }
+  | { outcome: "needs-identity" }
+  | { outcome: "done"; commit: { hash: string; subject: string } };
+
+/** The subject of the commit that proves history works. */
+export const TURN_ON_HISTORY_SUBJECT = "Turn on history";
+
 export interface HistoryQuery {
   /** One item, followed across key changes. Mutually exclusive with project. */
   key?: string;
@@ -1842,6 +1869,102 @@ export class Vault {
       lastError: this.lastCommitError,
       healthy: enabled && gitAvailable && isRepo && !ignored && !this.lastCommitError,
     };
+  }
+
+  /**
+   * Set git up for this vault and prove that a commit lands.
+   *
+   * The order is the point of this method:
+   *
+   * 1. **Identity before `git init`.** Without a `user.name` and `user.email`,
+   *    `git add` succeeds and `git commit` fails. `commit()` swallows that by
+   *    design, so every write would land with none of them committed. Checking
+   *    afterwards would leave a repo that has no way to commit. When identity
+   *    is missing, this returns `needs-identity` so the caller can ask for two
+   *    fields, rather than failing.
+   * 2. **`.gitattributes` before the first `git add`.** Otherwise Windows
+   *    stages CRLF while the vault writes LF, every file reads as wholly
+   *    modified, and the stable frontmatter ordering the diffs depend on is
+   *    lost. It is only written when absent, never over one the user wrote.
+   * 3. **Verify by doing it.** `healthy` only turns false after a commit has
+   *    already failed, so a fresh repo looks healthy whether or not a commit
+   *    can land. The initial commit is `--allow-empty` so that the same proof
+   *    works for a repo that exists, has nothing to stage, and was failing to
+   *    commit. It is read back from `git log` before `done` is returned.
+   */
+  async turnOnHistory(options: TurnOnHistoryOptions = {}): Promise<TurnOnHistoryResult> {
+    const git = (args: string[]) => execFileAsync("git", args, { cwd: this.root });
+
+    try {
+      await execFileAsync("git", ["--version"]);
+    } catch {
+      return { outcome: "no-git" };
+    }
+
+    const status = await this.gitStatus();
+    // Inside an outer repo that ignores the vault, `git init` would nest a
+    // second repository inside the first.
+    const nested = status.isRepo && status.ignored;
+    if (nested && !options.allowNested) {
+      return { outcome: "nested", repoRoot: status.repoRoot ?? this.root };
+    }
+
+    const identity = options.identity && {
+      name: options.identity.name.trim(),
+      email: options.identity.email.trim(),
+    };
+    if (identity) {
+      if (!identity.name) throw new VaultError("A name is needed to sign the commits.");
+      if (!/^[^\s@]+@[^\s@]+$/.test(identity.email)) {
+        throw new VaultError(`${identity.email || "An empty email"} is not an email address.`);
+      }
+    } else if (!(await this.hasGitIdentity())) {
+      return { outcome: "needs-identity" };
+    }
+
+    try {
+      const attributes = path.join(this.root, ".gitattributes");
+      if (!(await pathExists(attributes))) await writeFileAtomic(attributes, "* text eol=lf\n");
+
+      if (!status.isRepo || nested) await git(["init", "-q"]);
+      if (identity) {
+        await git(["config", "user.name", identity.name]);
+        await git(["config", "user.email", identity.email]);
+      }
+
+      await git(["add", "-A"]);
+      await git(["commit", "--allow-empty", "-q", "-m", TURN_ON_HISTORY_SUBJECT, "--no-verify"]);
+      const { stdout } = await git(["log", "-1", "--format=%h%x00%s"]);
+      const [hash = "", subject = ""] = stdout.trim().split("\0");
+      if (subject !== TURN_ON_HISTORY_SUBJECT) {
+        throw new Error(`the newest commit is "${subject}", not the one just made`);
+      }
+
+      this.lastCommitError = undefined;
+      return { outcome: "done", commit: { hash, subject } };
+    } catch (err) {
+      const stderr = (err as { stderr?: string }).stderr?.trim();
+      const detail = stderr || (err instanceof Error ? err.message : String(err));
+      throw new VaultError(`History could not be turned on: ${detail.split("\n")[0]}`);
+    }
+  }
+
+  /**
+   * Whether git would sign a commit made here, as configured at any level.
+   * Strict on purpose: some git builds invent `user@host` when nothing is set,
+   * and a history signed that way is not one anybody chose.
+   */
+  private async hasGitIdentity(): Promise<boolean> {
+    try {
+      const get = (key: string) => execFileAsync("git", ["config", "--get", key], { cwd: this.root });
+      const [{ stdout: name }, { stdout: email }] = await Promise.all([
+        get("user.name"),
+        get("user.email"),
+      ]);
+      return name.trim() !== "" && email.trim() !== "";
+    } catch {
+      return false; // `config --get` exits 1 for an unset key
+    }
   }
 
   /**

@@ -4,6 +4,7 @@ export {
   pushableFields,
   compareByRank,
   compareProjectsByRank,
+  TURN_ON_HISTORY_SUBJECT,
 } from "./vault.js";
 export type {
   VaultOptions,
@@ -15,6 +16,8 @@ export type {
   BulkUpdateResult,
   TrashEntry,
   GitStatus,
+  TurnOnHistoryOptions,
+  TurnOnHistoryResult,
   HistoryQuery,
 } from "./vault.js";
 export { parseGitLog, diffFrontmatter, diffArray, keyFromPath } from "./history.js";

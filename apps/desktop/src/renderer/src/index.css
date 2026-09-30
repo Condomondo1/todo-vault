@@ -574,6 +574,47 @@ button:focus-visible {
   font-size: 11px;
 }
 
+/* Wraps rather than squeezes: at the 900px minimum width, the name and email
+   fields beside the sentence left it a column one word wide. The sentence
+   keeps a floor and the controls move under it. */
+.banner-history {
+  flex-wrap: wrap;
+}
+
+.banner-history > span {
+  min-width: 320px;
+}
+
+/* The history banner's controls. Inputs are sized for a banner, not a modal:
+   the whole form has to fit beside the sentence explaining why it is there. */
+.history-setup,
+.history-setup-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.history-setup-form input {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  width: 170px;
+}
+
+.history-setup-note {
+  color: var(--text-dim);
+}
+
+.history-setup-error {
+  color: var(--overdue);
+  flex-basis: 100%;
+}
+
 .banner-close {
   color: var(--text-faint);
   padding: 0 4px;

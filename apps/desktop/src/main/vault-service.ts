@@ -14,6 +14,8 @@ import {
   type Project,
   type Status,
   type TrashEntry,
+  type TurnOnHistoryOptions,
+  type TurnOnHistoryResult,
 } from "todo-vault";
 
 import type { AgendaScope, AgendaView, ProjectSummary, VaultSnapshot } from "../shared/api.js";
@@ -341,6 +343,14 @@ export class VaultService extends EventEmitter {
 
   removeLink(key: string, target: string): Promise<Item> {
     return this.write((v) => v.removeLink(key, target));
+  }
+
+  /**
+   * Queued like a write, because it is one: `git add -A` and a commit, racing
+   * an auto-commit from a write in flight, would fight it for `index.lock`.
+   */
+  turnOnHistory(options: TurnOnHistoryOptions): Promise<TurnOnHistoryResult> {
+    return this.write((v) => v.turnOnHistory(options));
   }
 
   /**
