@@ -135,12 +135,9 @@ async function loadContext(service: VaultService, options: { freshMeta?: boolean
   // Settings → Jira caches the cloud id in the credential for a scoped token.
   // The map's copy and a fresh lookup are fallbacks for a credential saved
   // before that cache existed.
-  const cachedCloudId = (stored as { cloudId?: unknown }).cloudId;
   const cloudId =
     stored.auth === "scoped"
-      ? typeof cachedCloudId === "string"
-        ? cachedCloudId
-        : (map.cloudId ?? (await resolveCloudId(stored.site)))
+      ? (stored.cloudId ?? map.cloudId ?? (await resolveCloudId(stored.site)))
       : undefined;
 
   const client = createJiraClient({

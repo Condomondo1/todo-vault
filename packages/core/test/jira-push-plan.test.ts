@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { buildPushPlan, JiraMapSchema, type JiraMap } from "../src/jira.js";
+import { buildPushPlan, fieldsTheMapCanFill, JiraMapSchema, type JiraMap } from "../src/jira.js";
+import { requiredGaps } from "../src/jira-meta.js";
 import type { IssueTypeMeta, JiraFieldMeta, ProjectMeta } from "../src/jira-meta.js";
 import { Vault } from "../src/vault.js";
 
@@ -168,4 +169,66 @@ test("a child created in the same batch counts its parent as covered", async () 
   const plan = buildPushPlan(await items(vault), m, vault, { meta: m2 });
   assert.deepEqual(plan.blockers, [], "the parent is filled in once the epic exists");
   assert.equal(plan.drafts.find((d) => d.issueType === "Story")?.parentLocalKey, epic.key);
+});
+
+// ------------------------------------------------- map-level coverage
+
+test("every field a fully populated draft carries is one the map says it can fill", async () => {
+  const vault = await tmpVault();
+  const epic = await vault.createItem({ project: "ACME", summary: "E", type: "epic" });
+  await vault.createItem({
+    project: "ACME",
+    summary: "Everything set",
+    type: "story",
+    parent: epic.key,
+    priority: "high",
+    labels: ["billing"],
+    components: ["Web"],
+    assignee: "Dan",
+    dueDate: "2026-11-01",
+    startDate: "2026-10-01",
+    estimate: 3,
+    category: "Vendor management",
+  });
+  const m = map({
+    people: { dan: { accountId: "acc-1" } },
+    fields: { startDate: "customfield_10015", estimate: "customfield_10016", category: "customfield_10050" },
+    defaults: { customfield_1: "x" },
+    extraFields: {
+      customfield_10001: { mode: "always", value: "team-1" },
+      fixVersions: { mode: "ask", value: [{ id: "1" }] },
+      customfield_20000: { mode: "always", value: "epic only", issueTypes: ["Epic"] },
+    },
+  });
+
+  for (const draft of buildPushPlan(await items(vault), m, vault).drafts) {
+    const canFill = fieldsTheMapCanFill(m, draft.issueType);
+    const sent = [...Object.keys(draft.fields), ...(draft.parentLocalKey ? ["parent"] : [])];
+    const missing = sent.filter((id) => !canFill.has(id));
+    assert.deepEqual(missing, [], `${draft.localKey} (${draft.issueType}) sends fields the map-level answer does not know about`);
+  }
+});
+
+test("the map-level gap is Team until an extra field for Story fills it", () => {
+  const story = meta().issueTypes.find((t) => t.name === "Story")!;
+  const gaps = (m: JiraMap) => requiredGaps(story, fieldsTheMapCanFill(m, "Story")).map((g) => g.name);
+
+  assert.deepEqual(gaps(map()), ["Team"]);
+  assert.deepEqual(gaps(map({ extraFields: { customfield_10001: { mode: "ask" } } })), [], "ask can be filled at push time");
+  assert.deepEqual(gaps(map({ extraFields: { customfield_10001: { mode: "always", value: "t" } } })), []);
+  assert.deepEqual(
+    gaps(map({ extraFields: { customfield_10001: { mode: "always", value: null } } })),
+    ["Team"],
+    "an always field with no value sends nothing",
+  );
+  assert.deepEqual(
+    gaps(map({ extraFields: { customfield_10001: { mode: "always", value: "t", issueTypes: ["Epic"] } } })),
+    ["Team"],
+    "restricted to Epic, so it does nothing for Story",
+  );
+  assert.deepEqual(
+    gaps(map({ extraFields: { customfield_10001: { mode: "always", value: "t", issueTypes: [" story "] } } })),
+    [],
+    "issue type names match the way buildPushPlan matches them",
+  );
 });

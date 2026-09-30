@@ -57,6 +57,7 @@ export type { Tickable } from "./recurrence.js";
 export {
   blocksToWiki,
   buildPushPlan,
+  fieldsTheMapCanFill,
   jiraMapPath,
   loadJiraMap,
   writeJiraMap,
