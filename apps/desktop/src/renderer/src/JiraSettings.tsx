@@ -22,7 +22,14 @@ const TOKEN_PAGE = "https://id.atlassian.com/manage-profile/security/api-tokens"
  * again later, because tokens expire, and an expired one should show up here
  * rather than halfway through a push.
  */
-export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.Element {
+export function JiraSettings({
+  onClose,
+  vaultPeople,
+}: {
+  onClose: () => void;
+  /** The vault's assignees, one spelling each, for Mapping's People section. */
+  vaultPeople: string[];
+}): React.JSX.Element {
   const [status, setStatus] = useState<JiraStatus | null>(null);
   const [entering, setEntering] = useState(false);
   const [draft, setDraft] = useState<JiraCredentialInput>({
@@ -133,7 +140,7 @@ export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.El
           */}
           {credential && (
             <div role="tabpanel" aria-label="Mapping" className="jira-tabpanel" hidden={shown !== "mapping"}>
-              <JiraMapping />
+              <JiraMapping vaultPeople={vaultPeople} />
             </div>
           )}
 

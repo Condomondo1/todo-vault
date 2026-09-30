@@ -1460,7 +1460,7 @@ export function App(): React.JSX.Element {
       {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
 
       {claudeOpen && <ClaudeSettings onClose={() => setClaudeOpen(false)} />}
-      {jiraOpen && <JiraSettings onClose={() => setJiraOpen(false)} />}
+      {jiraOpen && <JiraSettings onClose={() => setJiraOpen(false)} vaultPeople={allAssignees} />}
 
       {creating && (
         <CreateDialog

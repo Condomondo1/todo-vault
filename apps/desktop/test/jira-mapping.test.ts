@@ -133,6 +133,87 @@ test("written through writeJiraMap, a Save keeps comments and leaves what it did
   assert.deepEqual(map.extraFields.customfield_10001?.value, { id: "t1" });
 });
 
+// ------------------------------------------------- extra fields and people
+
+const TEAM_SPEC = { name: "Team", mode: "always" as const, value: { id: "t2" }, issueTypes: ["Epic", "Story", "Task"] };
+const DAN_LINK = { accountId: "acc-dan", displayName: "Dan Okafor" };
+const edited = (edits: ReturnType<typeof mappingEdits>) => new Map(edits.map((e) => [e.path.join("."), e.value]));
+
+test("a choice without extra fields or people leaves the map's alone", () => {
+  const paths = mappingEdits(choice(), CLASSIC, mapOf({ extraFields: { customfield_1: { value: 1 } } })).map((e) =>
+    e.path.join("."),
+  );
+  assert.ok(!paths.some((p) => p.startsWith("extraFields") || p.startsWith("people")));
+});
+
+test("the panel's set of extra fields and people replaces the map's, entry by entry", () => {
+  const current = mapOf({
+    extraFields: { customfield_10001: { name: "Team", value: { id: "t1" } }, customfield_30000: { value: "gone" } },
+    people: { "Dan Okafor": { accountId: "old" }, "Ann Lee": { accountId: "acc-ann" } },
+  });
+  const edits = edited(
+    mappingEdits(choice({ extraFields: { customfield_10001: TEAM_SPEC }, people: { "Dan Okafor": DAN_LINK } }), CLASSIC, current),
+  );
+  assert.deepEqual(edits.get("extraFields.customfield_10001"), TEAM_SPEC);
+  assert.ok(edits.has("extraFields.customfield_30000"), "a field the panel dropped is removed");
+  assert.equal(edits.get("extraFields.customfield_30000"), undefined);
+  assert.deepEqual(edits.get("people.Dan Okafor"), DAN_LINK);
+  assert.ok(edits.has("people.Ann Lee"));
+  assert.equal(edits.get("people.Ann Lee"), undefined);
+  assert.ok(!edits.has("extraFields") && !edits.has("people"), "never the whole block over existing entries");
+});
+
+test("nothing empty is written: no null value, no empty issueTypes, no blank name", () => {
+  const edits = edited(
+    mappingEdits(
+      choice({ extraFields: { customfield_1: { name: "  ", mode: "ask", value: null, issueTypes: [" "] } } }),
+      CLASSIC,
+    ),
+  );
+  assert.deepEqual(edits.get("extraFields"), { customfield_1: { mode: "ask" } });
+});
+
+test("a bad extra field or person is refused", () => {
+  const withExtra = (id: string, mode = "always") =>
+    choice({ extraFields: { [id]: { mode: mode as "always" } } });
+  assert.throws(() => mappingEdits(withExtra("../token"), CLASSIC), /is not a Jira field id/);
+  assert.throws(() => mappingEdits(withExtra("customfield_1", "sometimes"), CLASSIC), /always or asked for/);
+  assert.throws(
+    () => mappingEdits(choice({ people: { "Dan Okafor": DAN_LINK, "dan okafor": DAN_LINK } }), CLASSIC),
+    /Dan Okafor and dan okafor are the same person to the push/,
+  );
+  assert.throws(
+    () => mappingEdits(choice({ people: { Dan: { accountId: " " } } }), CLASSIC),
+    /Choose a Jira account for Dan/,
+  );
+});
+
+test("into the example file, a first extra field and person are block style, and its comments stay", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jira-mapping-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "jira-map.yaml");
+
+  const map = await writeJiraMap(
+    file,
+    mappingEdits(choice({ extraFields: { customfield_10001: TEAM_SPEC }, people: { "Dan Okafor": DAN_LINK } }), CLASSIC),
+  );
+  const text = await fs.readFile(file, "utf8");
+
+  assert.match(text, /^# Jira field mapping\./);
+  assert.match(text, /^extraFields:\n {2}customfield_10001:\n {4}name: Team$/m, "block style, not flow");
+  assert.match(text, /^people:\n {2}Dan Okafor:\n {4}accountId: acc-dan$/m);
+  assert.match(text, /^# {2}customfield_10001:/m, "the example's commented-out entry survives");
+  assert.deepEqual(map.extraFields.customfield_10001, TEAM_SPEC);
+  assert.deepEqual(map.people["Dan Okafor"], DAN_LINK);
+});
+
+test("mapState hands back extra fields and people as the file has them", () => {
+  const state = mapState(mapOf({ extraFields: { customfield_10001: TEAM_SPEC }, people: { "Dan Okafor": DAN_LINK } }));
+  assert.ok(state.exists);
+  assert.deepEqual(state.extraFields, { customfield_10001: TEAM_SPEC });
+  assert.deepEqual(state.people, { "Dan Okafor": DAN_LINK });
+});
+
 // ------------------------------------------------------------ gaps
 
 const field = (fieldId: string, name: string, extra: Partial<JiraFieldMeta> = {}): JiraFieldMeta => ({

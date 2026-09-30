@@ -1,12 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type {
-  JiraAskField,
-  JiraDraftView,
-  JiraPushOutcome,
-  JiraPushPreview,
-  JiraPushProgress,
-} from "@shared/api";
+import type { JiraDraftView, JiraPushOutcome, JiraPushPreview, JiraPushProgress } from "@shared/api";
+
+import { JiraValueField } from "./JiraValueField";
 
 /**
  * The push pane: what would be created in Jira, then the one button that does it.
@@ -133,7 +129,7 @@ export function JiraPush({
                     Prefilled from Settings → Jira. A change here applies to this push only.
                   </p>
                   {preview.askFields.map((field) => (
-                    <AskField
+                    <JiraValueField
                       key={field.fieldId}
                       field={field}
                       onChange={(value) => setAskValues((cur) => ({ ...cur, [field.fieldId]: value }))}
@@ -272,123 +268,6 @@ function progressLabel(p: JiraPushProgress): string {
     case "skipped":
       return "skipped";
   }
-}
-
-/** One `ask` field's control, chosen by the kind Jira's schema implies. */
-function AskField({ field, onChange }: { field: JiraAskField; onChange: (value: unknown) => void }): React.JSX.Element {
-  const [raw, setRaw] = useState(() => (field.value === undefined ? "" : JSON.stringify(field.value, null, 2)));
-  const [rawError, setRawError] = useState<string | null>(null);
-  const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
-
-  let control: React.JSX.Element;
-  switch (field.kind) {
-    case "option":
-    case "priority":
-    case "version":
-    case "component": {
-      const index = field.choices.findIndex((c) => same(c.value, field.value));
-      control = (
-        <select value={index} onChange={(e) => onChange(Number(e.target.value) < 0 ? null : field.choices[Number(e.target.value)].value)}>
-          <option value={-1}>— none —</option>
-          {field.choices.map((c, i) => (
-            <option key={i} value={i}>
-              {c.label}
-            </option>
-          ))}
-        </select>
-      );
-      break;
-    }
-    case "options":
-    case "versions":
-    case "components": {
-      const current = Array.isArray(field.value) ? field.value : [];
-      control = (
-        <div className="jira-multi">
-          {field.choices.map((c, i) => {
-            const checked = current.some((v) => same(v, c.value));
-            return (
-              <label key={i} className="status-line">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => onChange(checked ? current.filter((v) => !same(v, c.value)) : [...current, c.value])}
-                />
-                {c.label}
-              </label>
-            );
-          })}
-        </div>
-      );
-      break;
-    }
-    case "text":
-    case "date":
-    case "datetime":
-    case "number":
-      control = (
-        <input
-          type={field.kind === "text" ? "text" : field.kind === "datetime" ? "datetime-local" : field.kind}
-          defaultValue={field.value === undefined || field.value === null ? "" : String(field.value)}
-          onChange={(e) => {
-            const v = e.target.value;
-            onChange(v === "" ? null : field.kind === "number" ? Number(v) : v);
-          }}
-        />
-      );
-      break;
-    case "labels":
-      control = (
-        <input
-          type="text"
-          placeholder="comma, separated"
-          defaultValue={Array.isArray(field.value) ? field.value.join(", ") : ""}
-          onChange={(e) =>
-            onChange(
-              e.target.value
-                .split(",")
-                .map((s) => s.trim().replace(/\s+/g, "-"))
-                .filter(Boolean),
-            )
-          }
-        />
-      );
-      break;
-    default:
-      // Sprint, Team, people and app fields: sent exactly as written.
-      control = (
-        <>
-          <textarea
-            rows={3}
-            value={raw}
-            spellCheck={false}
-            onChange={(e) => setRaw(e.target.value)}
-            onBlur={() => {
-              if (!raw.trim()) {
-                setRawError(null);
-                onChange(null);
-                return;
-              }
-              try {
-                onChange(JSON.parse(raw));
-                setRawError(null);
-              } catch {
-                setRawError("Not valid JSON — the previous value is still what would be sent.");
-              }
-            }}
-          />
-          <span className="field-note">Sent exactly as written, as JSON.</span>
-          {rawError && <span className="field-note due-overdue">{rawError}</span>}
-        </>
-      );
-  }
-
-  return (
-    <div className="modal-field">
-      <span title={field.fieldId}>{field.name}</span>
-      {control}
-    </div>
-  );
 }
 
 /** Attempts that may or may not have reached Jira, each needing a person to say which. */

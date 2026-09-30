@@ -7,7 +7,9 @@ import {
   type JiraFieldMeta,
   type ProjectMeta,
 } from "todo-vault/jira-meta";
-import type { JiraMapState, JiraMappingChoice, VaultIssueType } from "@shared/api";
+import type { JiraExtraField, JiraMapState, JiraMappingChoice, JiraPersonLink, VaultIssueType } from "@shared/api";
+
+import { ExtraFields, PeopleLinks, newExtraField } from "./JiraMappingExtras";
 
 const VAULT_TYPES: Array<[VaultIssueType, string]> = [
   ["epic", "Epic"],
@@ -31,8 +33,9 @@ const USUAL_NAMES: Record<VaultIssueType, string[]> = {
 };
 
 /**
- * Settings → Jira, the mapping half: which project, and where the vault's own
- * fields go in it. Extra fields and people are the next section's job.
+ * Settings → Jira → Mapping: which project, where the vault's own fields go in
+ * it, the Jira fields the vault has no equivalent for, and which Jira account
+ * each vault assignee is (the last two in JiraMappingExtras.tsx).
  *
  * Every choice here is offered from what the project actually has. The issue
  * types are the project's, and each field list holds only fields of the right
@@ -40,7 +43,7 @@ const USUAL_NAMES: Record<VaultIssueType, string[]> = {
  * panel never writes the site: Save sends what was picked, and main fills in
  * `baseUrl`, `auth` and `cloudId` from the verified credential.
  */
-export function JiraMapping(): React.JSX.Element {
+export function JiraMapping({ vaultPeople }: { vaultPeople: string[] }): React.JSX.Element {
   const [map, setMap] = useState<JiraMapState | null>(null);
   const [projectKey, setProjectKey] = useState("");
   const [meta, setMeta] = useState<ProjectMeta | null>(null);
@@ -52,6 +55,8 @@ export function JiraMapping(): React.JSX.Element {
     subtask: "",
   });
   const [fields, setFields] = useState<JiraMappingChoice["fields"]>({ category: "labels" });
+  const [extraFields, setExtraFields] = useState<Record<string, JiraExtraField>>({});
+  const [people, setPeople] = useState<Record<string, JiraPersonLink>>({});
   const [busy, setBusy] = useState<"load" | "save" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -69,6 +74,8 @@ export function JiraMapping(): React.JSX.Element {
         setProjectKey(result.value.projectKey);
         setTypes(result.value.issueTypes);
         setFields(result.value.fields);
+        setExtraFields(result.value.extraFields);
+        setPeople(result.value.people);
       }
     });
     return () => {
@@ -128,19 +135,37 @@ export function JiraMapping(): React.JSX.Element {
     (fieldsByKind.get(kind) ?? []).filter(({ field }) => !exclude.includes(field.fieldId));
 
   const complete = meta !== null && VAULT_TYPES.every(([t]) => types[t]);
+  const chosenTypes = useMemo(() => [...new Set(Object.values(types).filter(Boolean))], [types]);
+  const mappedFieldIds = [fields.startDate, fields.estimate, fields.category].filter(
+    (id): id is string => Boolean(id) && id !== "labels",
+  );
 
   const save = async (): Promise<void> => {
     if (!meta || !complete) return;
     setBusy("save");
     setError(null);
     setSaved(false);
-    const result = await window.vault.jiraSaveMap({ projectKey: meta.projectKey, issueTypes: types, fields });
+    const result = await window.vault.jiraSaveMap({
+      projectKey: meta.projectKey,
+      issueTypes: types,
+      fields,
+      // Only once the saved map has been read. Before that, these are empty
+      // for want of reading, not because someone removed everything, and
+      // sending them would clear the file's.
+      ...(map ? { extraFields, people } : {}),
+    });
     setBusy(null);
     if (!result.ok) {
       setError(result.message);
       return;
     }
     setMap(result.value);
+    // What main wrote, which may be tidier than what was sent (names trimmed,
+    // empty values dropped), so the panel shows the file and not the draft.
+    if (result.value.exists) {
+      setExtraFields(result.value.extraFields);
+      setPeople(result.value.people);
+    }
     setSaved(true);
   };
 
@@ -257,9 +282,25 @@ export function JiraMapping(): React.JSX.Element {
             </label>
           </fieldset>
 
+          <ExtraFields
+            meta={meta}
+            chosenTypes={chosenTypes}
+            mappedFieldIds={mappedFieldIds}
+            value={extraFields}
+            onChange={setExtraFields}
+          />
+
+          <PeopleLinks
+            projectKey={meta.projectKey}
+            vaultPeople={vaultPeople}
+            value={people}
+            setValue={setPeople}
+          />
+
           {/*
             Gaps are the saved map's, checked against this project, so they
             answer for what a push would do now rather than for unsaved picks.
+            Filling one adds it to Extra fields above, and Save re-checks.
           */}
           {map?.exists && map.projectKey === meta.projectKey && map.gaps && map.gaps.length > 0 && (
             <div className="jira-gaps">
@@ -267,11 +308,32 @@ export function JiraMapping(): React.JSX.Element {
                 A push of these types will be refused until each field is filled in:
               </p>
               <ul className="jira-blockers">
-                {map.gaps.map((gap) => (
-                  <li key={`${gap.issueType}:${gap.fieldId}`}>
-                    {gap.issueType} requires {gap.fieldName}, which nothing fills in.
-                  </li>
-                ))}
+                {map.gaps.map((gap) => {
+                  const spec = extraFields[gap.fieldId];
+                  const covers = spec && (!spec.issueTypes || spec.issueTypes.includes(gap.issueType));
+                  return (
+                    <li key={`${gap.issueType}:${gap.fieldId}`}>
+                      {gap.issueType} requires {gap.fieldName}, which nothing fills in.{" "}
+                      {covers ? (
+                        <span className="field-note">Added above; save to check it.</span>
+                      ) : (
+                        <button
+                          className="link-button"
+                          onClick={() =>
+                            setExtraFields((cur) => ({
+                              ...cur,
+                              [gap.fieldId]: cur[gap.fieldId]
+                                ? { ...cur[gap.fieldId], issueTypes: [...(cur[gap.fieldId].issueTypes ?? []), gap.issueType] }
+                                : newExtraField(meta, chosenTypes, gap.fieldId),
+                            }))
+                          }
+                        >
+                          Fill it in
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}

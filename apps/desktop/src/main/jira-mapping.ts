@@ -9,7 +9,14 @@
 import { fieldsTheMapCanFill, type JiraMap, type JiraMapEdit } from "todo-vault";
 import { issueTypeNamed, requiredGaps, type ProjectMeta } from "todo-vault/jira-meta";
 
-import type { JiraMapState, JiraMappingChoice, JiraMappingGap, VaultIssueType } from "../shared/api.js";
+import type {
+  JiraExtraField,
+  JiraMapState,
+  JiraMappingChoice,
+  JiraMappingGap,
+  JiraPersonLink,
+  VaultIssueType,
+} from "../shared/api.js";
 import type { StoredJiraCredential } from "./jira-credential.js";
 
 const VAULT_TYPES: readonly VaultIssueType[] = ["epic", "story", "task", "bug", "subtask"];
@@ -44,13 +51,17 @@ export function normaliseProjectKey(raw: string): string {
  * means the renderer cannot aim a push anywhere. `cloudId` is removed for a
  * classic token rather than left stale from a scoped one.
  *
- * `fields.epicLink`, `priorities`, `statusTransitions` and everything B2b-2
- * owns (`extraFields`, `people`) are not touched: this Save did not show them,
- * so it has no business changing them.
+ * `fields.epicLink`, `priorities`, `statusTransitions` and `defaults` are not
+ * touched: the panel does not show them, so it has no business changing them.
+ * `extraFields` and `people` are the panel's when the choice carries them, and
+ * then an entry missing from the choice is removed. That's why `current`, the
+ * map as it is on disk, is needed: a removal is an edit to a key the choice no
+ * longer names.
  */
 export function mappingEdits(
   choice: JiraMappingChoice,
   credential: Pick<StoredJiraCredential, "site" | "auth" | "cloudId">,
+  current: Pick<JiraMap, "extraFields" | "people"> | null = null,
 ): JiraMapEdit[] {
   const edits: JiraMapEdit[] = [
     { path: ["jiraProjectKey"], value: normaliseProjectKey(choice.projectKey) },
@@ -79,7 +90,82 @@ export function mappingEdits(
   }
   edits.push({ path: ["fields", "category"], value: category });
 
+  if (choice.extraFields) {
+    const chosen = Object.entries(choice.extraFields).map(([id, spec]) => extraFieldEntry(id, spec));
+    edits.push(...blockEdits("extraFields", chosen, Object.keys(current?.extraFields ?? {})));
+  }
+  if (choice.people) {
+    const chosen = peopleEntries(choice.people);
+    edits.push(...blockEdits("people", chosen, Object.keys(current?.people ?? {})));
+  }
+
   return edits;
+}
+
+/**
+ * Edits that make one keyed block hold exactly `chosen`.
+ *
+ * Entry by entry when the block already has entries, so the comments between
+ * them survive. When it has none, the whole block is set at once. The template
+ * writes an empty block as `{}`, and entries added into a flow map stay flow,
+ * so the file would read `extraFields: { customfield_10001: { name: Team, … } }`
+ * on one line. Set whole, the block is written in block style like the rest of
+ * the file.
+ */
+function blockEdits(block: string, chosen: Array<[string, unknown]>, existing: string[]): JiraMapEdit[] {
+  if (existing.length === 0) {
+    return chosen.length ? [{ path: [block], value: Object.fromEntries(chosen) }] : [];
+  }
+  const keep = new Set(chosen.map(([key]) => key));
+  return [
+    ...existing.filter((key) => !keep.has(key)).map((key) => ({ path: [block, key], value: undefined })),
+    ...chosen.map(([key, value]) => ({ path: [block, key], value })),
+  ];
+}
+
+/**
+ * One extra field as the map stores it, with nothing empty written. An
+ * `always` field with no value sends nothing, which is allowed: it is how a
+ * field is added before its value is known. The gaps still say it is unfilled.
+ */
+function extraFieldEntry(id: string, spec: JiraExtraField): [string, Record<string, unknown>] {
+  const fieldId = id.trim();
+  if (!FIELD_ID.test(fieldId)) throw new Error(`${fieldId || "An empty id"} is not a Jira field id.`);
+  if (spec.mode !== "always" && spec.mode !== "ask") {
+    throw new Error(`${spec.name ?? fieldId} needs to be sent always or asked for on each push.`);
+  }
+  const issueTypes = (spec.issueTypes ?? []).map((t) => t.trim()).filter(Boolean);
+  const name = spec.name?.trim();
+  return [
+    fieldId,
+    {
+      ...(name ? { name } : {}),
+      mode: spec.mode,
+      ...(spec.value !== undefined && spec.value !== null ? { value: spec.value } : {}),
+      ...(issueTypes.length ? { issueTypes } : {}),
+    },
+  ];
+}
+
+/**
+ * People by the vault's spelling. The push matches them case-insensitively, so
+ * two spellings of one person are refused here rather than left for the push
+ * to pick between.
+ */
+function peopleEntries(people: Record<string, JiraPersonLink>): Array<[string, Record<string, string>]> {
+  const seen = new Map<string, string>();
+  return Object.entries(people).map(([raw, link]) => {
+    const person = raw.trim();
+    if (!person) throw new Error("A person needs a name.");
+    const folded = person.toLowerCase();
+    const clash = seen.get(folded);
+    if (clash !== undefined) throw new Error(`${clash} and ${person} are the same person to the push. Keep one.`);
+    seen.set(folded, person);
+    const accountId = link.accountId?.trim();
+    if (!accountId) throw new Error(`Choose a Jira account for ${person}.`);
+    const displayName = link.displayName?.trim();
+    return [person, { accountId, ...(displayName ? { displayName } : {}) }];
+  });
 }
 
 /**
@@ -98,6 +184,18 @@ export function mapState(map: JiraMap, meta?: ProjectMeta): JiraMapState {
       ...(map.fields.estimate ? { estimate: map.fields.estimate } : {}),
       category: map.fields.category,
     },
+    extraFields: Object.fromEntries(
+      Object.entries(map.extraFields).map(([id, spec]) => [
+        id,
+        {
+          ...(spec.name ? { name: spec.name } : {}),
+          mode: spec.mode,
+          ...(spec.value !== undefined && spec.value !== null ? { value: spec.value } : {}),
+          ...(spec.issueTypes?.length ? { issueTypes: [...spec.issueTypes] } : {}),
+        },
+      ]),
+    ),
+    people: Object.fromEntries(Object.entries(map.people).map(([person, link]) => [person, { ...link }])),
     ...(gaps ? { gaps } : {}),
   };
 }

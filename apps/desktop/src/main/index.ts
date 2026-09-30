@@ -8,6 +8,7 @@ import {
   formatZodError,
   jiraMapPath,
   loadJiraMap,
+  searchAssignable,
   type HistoryQuery,
   type Status,
   type TurnOnHistoryOptions,
@@ -20,6 +21,7 @@ import {
   type JiraCredentialInput,
   type JiraMapState,
   type JiraMappingChoice,
+  type JiraPerson,
   type JiraStatus,
   type MaybeSnapshot,
   type Result,
@@ -539,7 +541,22 @@ function registerHandlers(): void {
 
   handle(CHANNELS.jiraSaveMap, async (choice: JiraMappingChoice) => {
     const stored = await requireJiraCredential();
-    return mapState(await service.saveJiraMap(mappingEdits(choice, stored)), mappingMetaFor(stored.site));
+    const map = await service.saveJiraMap((current) => mappingEdits(choice, stored, current));
+    return mapState(map, mappingMetaFor(stored.site));
+  });
+
+  // The assignable search, not the general one: an account Jira would refuse
+  // as an assignee here is not worth mapping a vault name to.
+  handle(CHANNELS.jiraSearchPeople, async (projectKey: string, query: string): Promise<JiraPerson[]> => {
+    const stored = await requireJiraCredential();
+    if (!query.trim()) return [];
+    const { client } = await openClient(stored);
+    const users = await searchAssignable(client, normaliseProjectKey(projectKey), query);
+    return users.map((u) => ({
+      accountId: u.accountId,
+      displayName: u.displayName ?? u.accountId,
+      ...(u.emailAddress ? { emailAddress: u.emailAddress } : {}),
+    }));
   });
 
   handle(CHANNELS.clearJiraCredentials, async () => {
