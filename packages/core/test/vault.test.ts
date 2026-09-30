@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { promises as fs, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -2179,18 +2179,20 @@ test("turnOnHistory explains a nesting instead of doing it, and does it when ask
   const vault = await Vault.init(path.join(outer, "tasks"), { git: true });
   assert.equal((await vault.gitStatus()).ignored, true);
 
+  // Compared as real paths. On a CI runner os.tmpdir() is spelled with an 8.3
+  // short name (C:\Users\RUNNER~1\...), and git answers with the long one
+  // for the same directory.
+  const real = (p: string) => realpathSync.native(p);
+
   const refused = await vault.turnOnHistory({ identity: IDENTITY });
   assert.equal(refused.outcome, "nested");
-  assert.equal(
-    refused.outcome === "nested" && path.resolve(refused.repoRoot),
-    path.resolve(outer),
-  );
+  assert.equal(refused.outcome === "nested" && real(refused.repoRoot), real(outer));
   assert.equal(await pathExists(path.join(vault.root, ".git")), false);
 
   const done = await vault.turnOnHistory({ identity: IDENTITY, allowNested: true });
   assert.equal(done.outcome, "done");
   const status = await vault.gitStatus();
-  assert.equal(path.resolve(status.repoRoot ?? ""), path.resolve(vault.root), "its own repo now");
+  assert.equal(real(status.repoRoot ?? ""), real(vault.root), "its own repo now");
   assert.equal(status.ignored, false);
   assert.equal(status.healthy, true);
 });
