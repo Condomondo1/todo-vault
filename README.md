@@ -14,7 +14,9 @@ Jira when it needs to be shared. The vault is always upstream; it is never a
 mirror.
 
 > **Status:** the vault core, CLI, MCP server and desktop app are built and in
-> daily use. The Jira push builds a reviewable payload but does not POST it.
+> daily use. The desktop app pushes to Jira from a review pane (Settings → Jira
+> connects it); it has not yet been run against a real Jira project. The CLI
+> and MCP server plan a push but never send one.
 > See [`PLAN.md`](PLAN.md) for what was built and why, and
 > [`IDEAS.md`](IDEAS.md) for what is being considered next.
 

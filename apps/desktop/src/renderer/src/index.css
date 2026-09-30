@@ -2675,3 +2675,145 @@ kbd.pill {
   color: var(--overdue);
   font-weight: 600;
 }
+
+/* ------------------------------------------------------------ Jira push */
+/* The push pane. Wider than the default modal, because a draft's fields are
+   read as a name/value list, and a narrow one wraps every value. Tokens only:
+   tokens.test.ts refuses a colour literal outside the two token blocks. */
+
+.modal.jira-push {
+  width: min(820px, 100%);
+}
+
+.jira-section {
+  margin-bottom: 16px;
+}
+
+.jira-section h3,
+.jira-section > summary {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin: 0 0 8px;
+}
+
+.jira-section > summary {
+  cursor: pointer;
+}
+
+.jira-drafts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.jira-draft {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+
+.jira-draft-blocked {
+  border-color: var(--overdue);
+}
+
+.jira-draft-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.jira-draft-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jira-draft-body {
+  padding: 0 12px 12px;
+}
+
+.jira-fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0 0 8px;
+}
+
+.jira-fields > div {
+  display: contents;
+}
+
+.jira-fields dt {
+  color: var(--text-dim);
+}
+
+.jira-fields dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.jira-json {
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 12px;
+}
+
+.jira-blockers,
+.jira-warnings {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.jira-blockers li {
+  color: var(--overdue);
+}
+
+.jira-warnings li + li,
+.jira-blockers li + li {
+  margin-top: 4px;
+}
+
+.jira-state {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.jira-state-created {
+  color: var(--done);
+}
+
+.jira-state-failed {
+  color: var(--overdue);
+}
+
+.jira-multi {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.jira-resolve {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}

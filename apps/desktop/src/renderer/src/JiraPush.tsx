@@ -1,0 +1,510 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import type {
+  JiraAskField,
+  JiraDraftView,
+  JiraPushOutcome,
+  JiraPushPreview,
+  JiraPushProgress,
+} from "@shared/api";
+
+/**
+ * The push pane: what would be created in Jira, then the one button that does it.
+ *
+ * Everything shown is built in main — the plan, the project's create screens,
+ * the stored credential's site — and nothing here can change what is sent
+ * except the `ask` fields, whose values go back as choices rather than as a
+ * payload. Pressing the button asks main to rebuild the plan from the same
+ * keys, so a field made required in Jira since the preview blocks the push
+ * rather than failing halfway through it.
+ *
+ * The button says what it does — "Create 3 issues in ENG" — because this is the
+ * one action in the app that writes somewhere other than the vault, into a
+ * tracker other people read.
+ */
+export function JiraPush({
+  keys,
+  onClose,
+}: {
+  keys: string[];
+  onClose: () => void;
+}): React.JSX.Element {
+  const [preview, setPreview] = useState<JiraPushPreview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [askValues, setAskValues] = useState<Record<string, unknown>>({});
+  const [loading, setLoading] = useState(true);
+  const [pushing, setPushing] = useState(false);
+  const [progress, setProgress] = useState<Record<string, JiraPushProgress>>({});
+  const [outcome, setOutcome] = useState<JiraPushOutcome | null>(null);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [showJson, setShowJson] = useState<ReadonlySet<string>>(() => new Set());
+  const requestId = useRef(0);
+
+  const load = useCallback(
+    async (values: Record<string, unknown>) => {
+      const id = ++requestId.current;
+      setLoading(true);
+      const result = await window.vault.jiraPreviewPush(keys, values);
+      // A slower, older preview must not overwrite a newer one.
+      if (id !== requestId.current) return;
+      setLoading(false);
+      if (result.ok) {
+        setPreview(result.value);
+        setError(null);
+      } else {
+        setError(result.message);
+      }
+    },
+    [keys],
+  );
+
+  // Re-plan when an ask value changes, a beat after the last change, so the
+  // blockers shown always match the values that would be sent.
+  useEffect(() => {
+    const timer = setTimeout(() => void load(askValues), Object.keys(askValues).length ? 350 : 0);
+    return () => clearTimeout(timer);
+  }, [askValues, load]);
+
+  const push = async (): Promise<void> => {
+    setPushing(true);
+    setProgress({});
+    const stop = window.vault.onJiraPushProgress((p) => setProgress((cur) => ({ ...cur, [p.localKey]: p })));
+    try {
+      const result = await window.vault.jiraPush(keys, askValues);
+      if (result.ok) setOutcome(result.value);
+      else setError(result.message);
+    } finally {
+      stop();
+      setPushing(false);
+    }
+  };
+
+  const toggle = (set: ReadonlySet<string>, key: string): Set<string> => {
+    const next = new Set(set);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    return next;
+  };
+
+  const drafts = preview?.drafts ?? [];
+  const blockers = preview?.blockers ?? [];
+  const canPush = !loading && !pushing && !outcome && drafts.length > 0 && blockers.length === 0;
+  const projectLabel = preview ? preview.projectKey : "Jira";
+
+  return (
+    <div className="modal-backdrop" onClick={pushing ? undefined : onClose}>
+      <div className="modal jira-push" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Push to Jira">
+        <header className="modal-head">
+          <h2>Push to Jira</h2>
+          {preview && (
+            <span className="pill" title={preview.site}>
+              {preview.projectKey} — {preview.projectName}
+            </span>
+          )}
+          <div className="spacer" />
+          <button className="btn" onClick={onClose} disabled={pushing} aria-label="Close">
+            ✕
+          </button>
+        </header>
+
+        <div className="modal-body">
+          {!preview && loading && <p className="field-note">Reading the project&rsquo;s create screens…</p>}
+          {error && <div className="modal-error">{error}</div>}
+
+          {preview && !outcome && (
+            <>
+              {preview.uncertain.length > 0 && <Uncertain preview={preview} onResolved={() => void load(askValues)} />}
+
+              {blockers.length > 0 && (
+                <section className="jira-section">
+                  <h3>Cannot be sent yet</h3>
+                  <ul className="jira-blockers">
+                    {blockers.map((b, i) => (
+                      <li key={`${b.localKey}-${i}`}>{b.message}</li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {preview.askFields.length > 0 && (
+                <section className="jira-section">
+                  <h3>For this push</h3>
+                  <p className="field-note">
+                    Prefilled from Settings → Jira. A change here applies to this push only.
+                  </p>
+                  {preview.askFields.map((field) => (
+                    <AskField
+                      key={field.fieldId}
+                      field={field}
+                      onChange={(value) => setAskValues((cur) => ({ ...cur, [field.fieldId]: value }))}
+                    />
+                  ))}
+                </section>
+              )}
+
+              <section className="jira-section">
+                <h3>
+                  {drafts.length} issue{drafts.length === 1 ? "" : "s"} to create
+                </h3>
+                {drafts.length === 0 && <p className="field-note">Nothing here needs creating.</p>}
+                <ul className="jira-drafts">
+                  {drafts.map((draft) => (
+                    <DraftRow
+                      key={draft.localKey}
+                      draft={draft}
+                      blocked={blockers.some((b) => b.localKey === draft.localKey)}
+                      open={expanded.has(draft.localKey)}
+                      json={showJson.has(draft.localKey)}
+                      progress={progress[draft.localKey]}
+                      onToggle={() => setExpanded((s) => toggle(s, draft.localKey))}
+                      onToggleJson={() => setShowJson((s) => toggle(s, draft.localKey))}
+                    />
+                  ))}
+                </ul>
+              </section>
+
+              {preview.warnings.length > 0 && (
+                <section className="jira-section">
+                  <h3>Worth knowing</h3>
+                  <ul className="jira-warnings">
+                    {preview.warnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {preview.skipped.length > 0 && (
+                <details className="jira-section">
+                  <summary>{preview.skipped.length} not sent</summary>
+                  <ul className="jira-warnings">
+                    {preview.skipped.map((s) => (
+                      <li key={s.localKey}>
+                        <strong>{s.localKey}</strong> — {s.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </>
+          )}
+
+          {outcome && <Outcome outcome={outcome} />}
+        </div>
+
+        <footer className="modal-foot">
+          {outcome ? (
+            <button className="btn btn-primary" onClick={onClose}>
+              Done
+            </button>
+          ) : (
+            <>
+              <button className="btn" onClick={onClose} disabled={pushing}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" disabled={!canPush} onClick={() => void push()}>
+                {pushing
+                  ? "Creating…"
+                  : `Create ${drafts.length} issue${drafts.length === 1 ? "" : "s"} in ${projectLabel}`}
+              </button>
+            </>
+          )}
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function DraftRow({
+  draft,
+  blocked,
+  open,
+  json,
+  progress,
+  onToggle,
+  onToggleJson,
+}: {
+  draft: JiraDraftView;
+  blocked: boolean;
+  open: boolean;
+  json: boolean;
+  progress?: JiraPushProgress;
+  onToggle: () => void;
+  onToggleJson: () => void;
+}): React.JSX.Element {
+  return (
+    <li className={`jira-draft${blocked ? " jira-draft-blocked" : ""}`}>
+      <button type="button" className="jira-draft-head" onClick={onToggle} aria-expanded={open}>
+        <span className="cell-key">{draft.localKey}</span>
+        <span className="jira-draft-summary">{draft.summary}</span>
+        <span className="pill">{draft.issueType}</span>
+        {draft.parentLocalKey && <span className="field-note">under {draft.parentLocalKey}</span>}
+        {progress && <span className={`jira-state jira-state-${progress.state}`}>{progressLabel(progress)}</span>}
+      </button>
+      {open && (
+        <div className="jira-draft-body">
+          <dl className="jira-fields">
+            {draft.fields.map((f) => (
+              <div key={f.fieldId}>
+                <dt title={f.fieldId}>{f.name}</dt>
+                <dd>{f.text || <span className="field-note">empty</span>}</dd>
+              </div>
+            ))}
+          </dl>
+          <button type="button" className="btn" onClick={onToggleJson}>
+            {json ? "Hide JSON" : "Show JSON"}
+          </button>
+          {json && <pre className="jira-json">{draft.json}</pre>}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function progressLabel(p: JiraPushProgress): string {
+  switch (p.state) {
+    case "creating":
+      return "creating…";
+    case "created":
+      return p.jiraKey;
+    case "failed":
+      return p.uncertain ? "unknown" : "failed";
+    case "skipped":
+      return "skipped";
+  }
+}
+
+/** One `ask` field's control, chosen by the kind Jira's schema implies. */
+function AskField({ field, onChange }: { field: JiraAskField; onChange: (value: unknown) => void }): React.JSX.Element {
+  const [raw, setRaw] = useState(() => (field.value === undefined ? "" : JSON.stringify(field.value, null, 2)));
+  const [rawError, setRawError] = useState<string | null>(null);
+  const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+  let control: React.JSX.Element;
+  switch (field.kind) {
+    case "option":
+    case "priority":
+    case "version":
+    case "component": {
+      const index = field.choices.findIndex((c) => same(c.value, field.value));
+      control = (
+        <select value={index} onChange={(e) => onChange(Number(e.target.value) < 0 ? null : field.choices[Number(e.target.value)].value)}>
+          <option value={-1}>— none —</option>
+          {field.choices.map((c, i) => (
+            <option key={i} value={i}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+      );
+      break;
+    }
+    case "options":
+    case "versions":
+    case "components": {
+      const current = Array.isArray(field.value) ? field.value : [];
+      control = (
+        <div className="jira-multi">
+          {field.choices.map((c, i) => {
+            const checked = current.some((v) => same(v, c.value));
+            return (
+              <label key={i} className="status-line">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => onChange(checked ? current.filter((v) => !same(v, c.value)) : [...current, c.value])}
+                />
+                {c.label}
+              </label>
+            );
+          })}
+        </div>
+      );
+      break;
+    }
+    case "text":
+    case "date":
+    case "datetime":
+    case "number":
+      control = (
+        <input
+          type={field.kind === "text" ? "text" : field.kind === "datetime" ? "datetime-local" : field.kind}
+          defaultValue={field.value === undefined || field.value === null ? "" : String(field.value)}
+          onChange={(e) => {
+            const v = e.target.value;
+            onChange(v === "" ? null : field.kind === "number" ? Number(v) : v);
+          }}
+        />
+      );
+      break;
+    case "labels":
+      control = (
+        <input
+          type="text"
+          placeholder="comma, separated"
+          defaultValue={Array.isArray(field.value) ? field.value.join(", ") : ""}
+          onChange={(e) =>
+            onChange(
+              e.target.value
+                .split(",")
+                .map((s) => s.trim().replace(/\s+/g, "-"))
+                .filter(Boolean),
+            )
+          }
+        />
+      );
+      break;
+    default:
+      // Sprint, Team, people and app fields: sent exactly as written.
+      control = (
+        <>
+          <textarea
+            rows={3}
+            value={raw}
+            spellCheck={false}
+            onChange={(e) => setRaw(e.target.value)}
+            onBlur={() => {
+              if (!raw.trim()) {
+                setRawError(null);
+                onChange(null);
+                return;
+              }
+              try {
+                onChange(JSON.parse(raw));
+                setRawError(null);
+              } catch {
+                setRawError("Not valid JSON — the previous value is still what would be sent.");
+              }
+            }}
+          />
+          <span className="field-note">Sent exactly as written, as JSON.</span>
+          {rawError && <span className="field-note due-overdue">{rawError}</span>}
+        </>
+      );
+  }
+
+  return (
+    <div className="modal-field">
+      <span title={field.fieldId}>{field.name}</span>
+      {control}
+    </div>
+  );
+}
+
+/** Attempts that may or may not have reached Jira, each needing a person to say which. */
+function Uncertain({ preview, onResolved }: { preview: JiraPushPreview; onResolved: () => void }): React.JSX.Element {
+  const [keys, setKeys] = useState<Record<string, string>>({});
+  const [message, setMessage] = useState<string | null>(null);
+
+  const resolve = async (localKey: string, jiraKey: string | null): Promise<void> => {
+    const result = await window.vault.jiraResolveUncertain(localKey, jiraKey);
+    if (result.ok) {
+      setMessage(null);
+      onResolved();
+    } else {
+      setMessage(result.message);
+    }
+  };
+
+  return (
+    <section className="jira-section">
+      <h3>Did these reach Jira?</h3>
+      <p className="field-note">
+        A previous push lost its connection before Jira answered, so these may already exist. They will not be
+        sent again until you say.
+      </p>
+      <ul className="jira-drafts">
+        {preview.uncertain.map((a) => (
+          <li key={a.localKey} className="jira-draft">
+            <div className="jira-draft-head">
+              <span className="cell-key">{a.localKey}</span>
+              <span className="jira-draft-summary">{a.summary}</span>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void window.vault.openTarget({ kind: "external", value: a.searchUrl })}
+              >
+                Check in Jira
+              </button>
+            </div>
+            <div className="jira-draft-body jira-resolve">
+              <input
+                type="text"
+                placeholder={`${preview.projectKey}-123`}
+                value={keys[a.localKey] ?? ""}
+                onChange={(e) => setKeys((k) => ({ ...k, [a.localKey]: e.target.value }))}
+              />
+              <button
+                type="button"
+                className="btn"
+                disabled={!keys[a.localKey]?.trim()}
+                onClick={() => void resolve(a.localKey, keys[a.localKey])}
+              >
+                It exists
+              </button>
+              <button type="button" className="btn" onClick={() => void resolve(a.localKey, null)}>
+                It was not created
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {message && <div className="modal-error">{message}</div>}
+    </section>
+  );
+}
+
+function Outcome({ outcome }: { outcome: JiraPushOutcome }): React.JSX.Element {
+  return (
+    <>
+      {outcome.created.length > 0 && (
+        <section className="jira-section">
+          <h3>Created {outcome.created.length}</h3>
+          <ul className="jira-warnings">
+            {outcome.created.map((c) => (
+              <li key={c.localKey}>
+                <strong>{c.localKey}</strong> →{" "}
+                <a
+                  href={c.url}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void window.vault.openTarget({ kind: "external", value: c.url });
+                  }}
+                >
+                  {c.jiraKey}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {outcome.failed.length > 0 && (
+        <section className="jira-section">
+          <h3>Failed {outcome.failed.length}</h3>
+          <ul className="jira-blockers">
+            {outcome.failed.map((f) => (
+              <li key={f.localKey}>
+                <strong>{f.localKey}</strong> — {f.message}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {outcome.skipped.length > 0 && (
+        <section className="jira-section">
+          <h3>Not sent {outcome.skipped.length}</h3>
+          <ul className="jira-warnings">
+            {outcome.skipped.map((s) => (
+              <li key={s.localKey}>
+                <strong>{s.localKey}</strong> — {s.reason}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {outcome.created.length === 0 && outcome.failed.length === 0 && outcome.skipped.length === 0 && (
+        <p className="field-note">Nothing was sent.</p>
+      )}
+    </>
+  );
+}

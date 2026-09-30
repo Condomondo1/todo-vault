@@ -52,6 +52,7 @@ export function ItemDetail({
   onSelect,
   onDelete,
   onNewChild,
+  onPushToJira,
   mutate,
   attachPaths,
 }: {
@@ -74,6 +75,8 @@ export function ItemDetail({
   onDelete: (item: Item) => void;
   /** Opens the create form pointed at this item as parent, already typed. */
   onNewChild: (parent: Item, type: ItemType) => void;
+  /** Opens the push pane for this one item. */
+  onPushToJira: (key: string) => void;
   mutate: (call: () => Promise<Result<VaultSnapshot | null>>) => Promise<string | null>;
   /** Dropped paths, which main may link rather than copy — see `onDrop`. */
   attachPaths: (
@@ -478,7 +481,12 @@ export function ItemDetail({
                 {item.sync.jiraKey} <span className="pill">{item.sync.state}</span>
               </>
             ) : (
-              <span className="field-note">not pushed</span>
+              <>
+                <span className="field-note">not pushed</span>{" "}
+                <button type="button" className="btn" onClick={() => onPushToJira(item.key)}>
+                  Push to Jira…
+                </button>
+              </>
             )}
           </dd>
 
