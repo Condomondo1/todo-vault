@@ -2567,6 +2567,74 @@ kbd.pill {
   border-radius: 7px;
 }
 
+/* ---------------------------------------------------------- jira settings */
+.jira-connect {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.jira-auth-kind {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.jira-auth-kind legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* A radio row, not a field: undo the column layout, the small-caps caption
+   and the full-width input that .modal-body gives every label. */
+.modal-body .jira-auth-option {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.modal-body .jira-auth-option > input {
+  width: auto;
+  margin-top: 2px;
+}
+
+.modal-body .jira-auth-option > span {
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+}
+
+.jira-auth-option small {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+/* An external link that has to go through main (openTarget), so it is a
+   button dressed as a link rather than an <a> the window would navigate. */
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .draft-box {
   display: flex;
   align-items: flex-start;

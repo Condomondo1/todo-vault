@@ -3691,3 +3691,76 @@ are asserted on what was actually sent. **Not verified:** nothing here has
 talked to a real Jira. Which list key a live site sends, and whether
 `/_edge/tenant_info` answers for every Cloud site, are exactly what the one
 hand-run check in the plan is for.
+
+## Jira, part B1: the credential is stored once ✅ built and driven
+
+The first piece of Settings → Jira, from `plans/PLAN-jira-push.md` (slice B,
+split in two as the plan allowed). It stores the connection and nothing more.
+Test connection, the project picker and the mapping need slice A's Jira client
+and are part B2. This half ships on its own because it has no dependency on the
+client, and because the storage rules are the part worth getting right before
+anything can send.
+
+**`secrets.ts` went from one key to named secrets, with no rule weakened.** It
+now has `setSecret`, `getSecret`, `clearSecret` and `secretStatus`, each taking
+`"claude" | "jira"`, one file per name in `userData`
+(`claude-key.bin`, `jira-credentials.bin`). The Claude functions remain as
+one-line wrappers, so the Claude layer did not change. It is one module rather
+than a copy per secret because a second secret is exactly when a copied module
+starts drifting from the first. The rules are still: main process only, no
+plaintext fallback, and a secret that will not decrypt counts as absent.
+
+**Site, email and token are one encrypted blob.** The plan already paired the
+email with the token, so the two can never disagree: replacing one re-enters
+the other, and the "right token, stale email" 401 cannot happen. Building it
+added the site to the same blob, for the same reason in a different form. A
+token is issued for one site, and a stored token with no record of which site
+might be sent to whatever site a map later names. The map's `baseUrl` still
+exists and is still what the push is configured by. The credential's site is
+what slice C can check it against before sending anything. The blob is
+versioned (`v: 1`), and one this code cannot read counts as no credential, the
+same as one it cannot decrypt.
+
+**The site is checked where it is stored, by the rules the client uses.**
+`parseJiraSite` is a thin layer over the core's `normaliseBaseUrl`, which slice
+A1 landed while this was in review. It refuses `http:` rather than upgrading
+it, refuses a URL with a user or password in it, and reduces a pasted board URL
+to its origin. B1 first had its own copy of those three rules. It was swapped
+onto the core's before merging, so a site the panel accepts is one the client
+will accept, and there is only one place the rules can change. The layer adds
+two things that matter only in a settings field: a prompt for an empty field,
+and `https://` for a bare host. A bad site is therefore never stored at all,
+and every request checks it again.
+
+**One way across IPC, as with the Claude key.** `jira:set-credentials` sends
+the pair in once. `jira:status` and `jira:clear-credentials` answer with
+`{ storageAvailable, credential?: { site, auth, email, verifiedAt? } }`, which is
+`summarise()`'s output. That function builds the summary from named fields, so
+the token is absent by construction rather than because someone remembered to
+delete it. The panel's Replace prefills site, kind and email and asks for the
+token, because the three are stored together and the token is the one thing
+the panel never has.
+
+**Two token kinds, chosen up front.** A classic token authenticates against the
+site. A scoped one goes through `api.atlassian.com/ex/jira/{cloudId}`. The
+header is the same and the base URL differs, so the kind is stored with the
+credential and resolving `cloudId` is left to slice A's client. The radio
+options were first labelled "API token" and "Scoped API token", which gave the
+page two controls both named "API token". Playwright's strict locator found
+that before a screen reader user could. They are now "Classic token" and
+"Scoped token". The scope names the panel suggests ("read and write Jira work
+items, read users") are still the unverified fact the plan flags.
+
+**A stored credential reads as "not verified yet".** Nothing in B1 can talk to
+Jira, so the panel claims nothing beyond what is on disk. `verifiedAt` already
+exists in the blob and the status for B2's Test connection to set.
+
+Verified in `test/jira-credential.test.ts` (site parsing, validation, the blob
+round trip, and a summary that never contains the token) and
+`e2e/jira-settings.e2e.mts`. The e2e spec drives the panel in a real window.
+An `http:` site is refused and no file is written. An https board URL is
+stored as its origin. The file on disk contains neither the token nor the
+email in plain text, so `safeStorage` really encrypted it on this machine.
+Status over IPC is exactly the summary. Replace keeps site and email and
+empties the token. Remove deletes the file. Not verified: any request to
+Jira. B1 makes none, by design.

@@ -112,6 +112,38 @@ export interface ClaudeStatus {
 }
 
 /**
+ * Jira's credential crosses this boundary the same one way the Anthropic key
+ * does: in, once, when saved. What comes back is everything *but* the token.
+ */
+export type JiraAuthKind = "site" | "scoped";
+
+export interface JiraCredentialInput {
+  /** As typed. Main reduces it to an https origin, or refuses it. */
+  site: string;
+  auth: JiraAuthKind;
+  email: string;
+  token: string;
+}
+
+/** A stored credential, told to the renderer with the token left out. */
+export interface JiraCredentialSummary {
+  site: string;
+  auth: JiraAuthKind;
+  email: string;
+  /** When Test connection last succeeded with this credential. */
+  verifiedAt?: string;
+}
+
+export interface JiraStatus {
+  /** safeStorage can actually encrypt on this machine. False means nothing can be stored. */
+  storageAvailable: boolean;
+  /** Absent when none is stored, or when the stored one cannot be decrypted or read. */
+  credential?: JiraCredentialSummary;
+  /** Written for a human, shown when storage is unavailable. */
+  reason?: string;
+}
+
+/**
  * A proposed item, rendered for confirmation and never written directly.
  *
  * `input` has already been validated against the core's CreateItemInput in main,
@@ -316,6 +348,14 @@ export interface VaultApi {
   /** One-way. There is no matching getter — the key never comes back out. */
   setClaudeKey(key: string): Promise<Result<ClaudeStatus>>;
   clearClaudeKey(): Promise<Result<ClaudeStatus>>;
+
+  // ------------------------------------------------------------- Jira
+  // Settings -> Jira. Same one-way rule as the Claude key: set and clear
+  // answer with a status, and no call returns the token.
+
+  jiraStatus(): Promise<Result<JiraStatus>>;
+  setJiraCredentials(input: JiraCredentialInput): Promise<Result<JiraStatus>>;
+  clearJiraCredentials(): Promise<Result<JiraStatus>>;
   /**
    * Turn a sentence into a proposed item. Returns a draft for confirmation —
    * this never writes. `defaultProject` is the project the UI has in focus,
@@ -393,6 +433,10 @@ export const CHANNELS = {
   claudeStatus: "claude:status",
   setClaudeKey: "claude:set-key",
   clearClaudeKey: "claude:clear-key",
+
+  jiraStatus: "jira:status",
+  setJiraCredentials: "jira:set-credentials",
+  clearJiraCredentials: "jira:clear-credentials",
   draftItem: "claude:draft",
 
   /** main -> renderer push */

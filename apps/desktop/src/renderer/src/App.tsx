@@ -21,6 +21,7 @@ import { HiddenPanel } from "./HiddenPanel";
 import { CommandPalette } from "./CommandPalette";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { ClaudeSettings } from "./ClaudeSettings";
+import { JiraSettings } from "./JiraSettings";
 import { isTypingTarget } from "./shortcuts";
 import { backlogOrder, boardLanes, visibleBoardStatuses } from "./ordering";
 import { monthGrid, stepMonth } from "./calendar";
@@ -162,6 +163,7 @@ export function App(): React.JSX.Element {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [claudeOpen, setClaudeOpen] = useState(false);
+  const [jiraOpen, setJiraOpen] = useState(false);
   /** Set by `e`: the item whose summary should open for editing. Consumed once. */
   const [editSummaryFor, setEditSummaryFor] = useState<string | null>(null);
   /** The agenda builds its order asynchronously, so it reports it upward. */
@@ -190,7 +192,8 @@ export function App(): React.JSX.Element {
     showHidden ||
     paletteOpen ||
     helpOpen ||
-    claudeOpen;
+    claudeOpen ||
+    jiraOpen;
 
   /** Whether the bulk edit bar is showing — backlog only, and only with a selection. */
   const bulkBarOpen = view === "backlog" && checked.size > 0;
@@ -1013,6 +1016,13 @@ export function App(): React.JSX.Element {
             >
               Claude
             </button>
+            <button
+              className="btn"
+              onClick={() => setJiraOpen(true)}
+              title="Jira connection — for pushing reviewed items to one Jira project"
+            >
+              Jira
+            </button>
             <button className="btn" onClick={() => setHelpOpen(true)} title="Keyboard shortcuts (?)">
               ?
             </button>
@@ -1443,6 +1453,7 @@ export function App(): React.JSX.Element {
       {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
 
       {claudeOpen && <ClaudeSettings onClose={() => setClaudeOpen(false)} />}
+      {jiraOpen && <JiraSettings onClose={() => setJiraOpen(false)} />}
 
       {creating && (
         <CreateDialog

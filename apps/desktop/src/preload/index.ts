@@ -49,6 +49,9 @@ const api: VaultApi = {
   claudeStatus: () => ipcRenderer.invoke(CHANNELS.claudeStatus),
   setClaudeKey: (key) => ipcRenderer.invoke(CHANNELS.setClaudeKey, key),
   clearClaudeKey: () => ipcRenderer.invoke(CHANNELS.clearClaudeKey),
+  jiraStatus: () => ipcRenderer.invoke(CHANNELS.jiraStatus),
+  setJiraCredentials: (input) => ipcRenderer.invoke(CHANNELS.setJiraCredentials, input),
+  clearJiraCredentials: () => ipcRenderer.invoke(CHANNELS.clearJiraCredentials),
   draftItem: (prompt, defaultProject) =>
     ipcRenderer.invoke(CHANNELS.draftItem, prompt, defaultProject),
 
