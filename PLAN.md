@@ -3332,3 +3332,125 @@ reading at midnight. `today` is computed when `filtered` recomputes, not on a
 timer, so a window left open overnight keeps yesterday's reading until the next
 edit or filter change. That is true of every date the app shows, and not new
 here.
+
+## A CSV export Jira's bulk create can actually load ✅ built (PR #53)
+
+`vault jira csv` existed, but it was a spreadsheet dump with Jira-shaped column
+names. Nine columns wide and untested, it lost most of what the vault knows, and
+the worst of that was silent. The `Parent` column carried the local key, and
+with no `Issue Id` column for it to resolve against, an import *succeeded* and
+arrived with every epic and story unparented.
+
+**It extends `toJiraCsv` rather than adding a script.** The obvious reading of
+"write a script to export tickets" is `scripts/export-jira-csv.mts`, and it
+would have been a second interpreter of `jira-map.yaml`, free to drift from the
+API path exactly as the old CSV path already had. The same item exported by CSV
+and pushed by API produced two different issues: one had `buildDescription`'s
+link footer and provenance line, and the other had the raw body. Running the
+export twice created everything twice, because only `buildPushPlan` skipped
+items Jira already held. So the *decisions* both paths must make identically
+(eligibility, priority lookup, where `category` goes, whether a start date has a
+field id) became named helpers in `jira.ts` that both call. The field
+*derivation* deliberately stayed separate: REST wants nested objects and CSV
+wants flat cells under readable headers, and a shared shape would have needed a
+translation layer harder to read than the two loops.
+
+**What the Cloud importer wants**, each for a reason that shows up only on a
+real import:
+- `Issue Id` and `Parent id` link rows within one batch. An out-of-batch parent
+  already in Jira goes in `Parent` by its real key. An `Epic Link` column is
+  added alongside when `fields.epicLink` is set, for older company-managed
+  projects.
+- Labels and components use repeated columns, not one space-joined cell. That
+  takes two passes, because the header's width is the widest row.
+- Descriptions are converted to wiki markup by `blocksToWiki`, a serializer over
+  the same closed block subset `markdownToAdf` uses, so it can flatten but never
+  fail.
+- The file has a BOM and CRLF endings, so Excel does not mojibake it on the way
+  to being checked by eye. Jira ignores both.
+
+**People are the real import risk.** `assignee` and `reporter` are free text
+typed by hand, and Cloud resolves a person column against real accounts: it
+fails the row or offers to create a user when it cannot. `Assignee` is always
+emitted, because an unassigned bulk import is not much use. `Reporter` is
+opt-in behind `--reporter`, because it is the field most likely to hold a name
+with no account behind it and the one Jira cares least about. Either way, the
+command prints the distinct names it is about to emit, so they can be checked
+before the import rather than after a half-failed one.
+
+**`vault jira record --from <csv>` closes the loop.** A bulk import leaves Jira
+holding new issues and the vault knowing nothing, so the next export duplicates
+everything. `record` reads the file exported back out of Jira *by column name*,
+since that file's column order is not ours to assume, and stamps each key with
+`markPushed`. An unknown local key is reported and skipped. So is a local key
+already stamped with a *different* Jira key, since that is either a double
+import or the wrong file, and both want a human. Without `record`, the export
+would be a one-shot, and a one-shot bulk loader gets run twice.
+
+**Where the build departed from the plan.** The plan said the 500-row cap should
+*refuse* rather than truncate. The build *pages* instead, reading `total` from
+`listItems` and looping until it has everything, with a guard that stops if the
+two ever disagree. A refusal would have made every vault over 500 open items
+unexportable, which is the same failure moved to a different place.
+
+**Found on the way: `category` was missing from `pushableFields`**, although
+`buildPushPlan` pushes it. Editing a category left the content hash unmoved, so
+the item read as pushed-and-unchanged indefinitely. That is the same bug the
+`links` comment beside it records. It was latent until `record` existed, and
+stamping made it live, because the whole point of a stamp is that the next
+export skips what Jira already has. Adding the field changes the hash of every
+already-pushed item, so the first export afterwards produces one burst of drift
+warnings. That is correct: those items genuinely have an unverified category in
+Jira.
+
+**Not doing.** Status: the importer wants status *names*, while `jira-map.yaml`
+holds transition names, a different vocabulary. Deriving one from the other
+would fail rows for unrelated reasons, and open-only is already the default.
+Attachments: a CSV can only reference a URL Jira can fetch, and a local path is
+not one. Comments: the importer's `date;author;body` column format is brittle
+and lossy, and `buildDescription` omits comments on the API path too.
+
+Covered by `test/jira-csv.test.ts` (new), which tests the silent failures: a
+parent and child linked by id, a label containing a space surviving as one
+label, a description holding a comma, a quote and a newline round-tripping
+through a CSV parser, skip versus drift-warn, BOM and CRLF, an object-valued
+default warning rather than printing `[object Object]`, and a category-only
+edit moving an item out of pushed-and-unchanged. **Not verified:** no file has
+been loaded into a real Jira Cloud importer. The column names come from Cloud's
+documentation, and its mapping screen lets a human pair columns by hand, which
+limits the damage if one is off.
+
+## `vault-capture` splits an ask into its deliverables ✅ built (PR #54)
+
+A one-line ask, *"create a task for the Emailgistics epic to call Renee and
+check stats against the logs"*, came back as one task with two verbs in its
+summary. It was filed nowhere, because the epic did not exist, and Renee ended
+up either lost in prose or put in `reporter`, although she asked for nothing.
+That one sentence holds two deliverables, a container, and a person who is the
+object of the work rather than a party to it.
+
+**One test for splitting:** two clauses are two items when either could be
+finished while the other is not. The manner, the acceptance criterion, or the
+audience of a single outcome ("send the SOW and cc Legal") stays one item. The
+test is deliberately about completion rather than grammar, because "and" joins
+both kinds.
+
+**A missing container is drafted as an epic, not asked about.** An epic is
+cheap to re-parent later. A project is not, because its prefix is stamped into
+every child key and re-keying is the costliest operation the vault has. So the
+container becomes a project only when the user says so, and the draft names
+that alternative in one line.
+
+**`assignee` and `startDate` moved from "never guessed" to guessed with
+evidence.** People resolve against the roster of names already in the vault. A
+bare first name counts only if exactly one name matches, and an assignee is
+inferred only when every open item in the project agrees. A reporter / assignee
+/ neither table is what fixes the Renee case: the object of a verb is neither.
+Every item now gets a proposed due date derived from the shape of the work,
+because an item with no date and no cadence never reaches the agenda.
+`startDate` is proposed only as a plan, since the first move to `in_progress`
+overwrites it anyway.
+
+**Not verified:** the change is skill prose only. No capture has been run
+against a live vault with the new text, so whether it produces the worked
+example's draft in practice is untested.
