@@ -25,6 +25,165 @@ already exists (`wx`, the exclusive-create flag) and retry allocation on
 around the whole allocation also works, but on Windows it brings stale-lock
 recovery with it.
 
+## The command palette finds things but cannot do anything
+
+`CommandPalette.tsx` searches two kinds of row, projects and items, and opening
+one is the only thing it can do. Every edit still goes through the detail panel
+or a single-key shortcut, and nothing lets you type an action and have the
+palette find it. The usual next step for a palette is verbs: *set due…*, *move to
+status…*, *assign…*, *tick*, *open History for this item*. Each one applies to
+the selected item, or to the checked set when bulk selection is active.
+`BulkBar` already defines what a multi-item edit means, so the palette would be a
+second way into edits that already exist, not a new write path.
+
+The design question is how a verb takes an argument. A two-step palette (pick the
+verb, then pick the value from a second list) is the standard shape, and it
+reuses the `Suggest` component that Reporter and Assignee already share for the
+people and category fields.
+
+## An undo for the last edit, since there is no save button to hesitate at
+
+Every edit in the detail panel commits the moment it lands. That is the design,
+and it is why there is no draft state to lose. It also means a slip of the
+keyboard is written, committed and synced before you notice it. The only way back
+today is to read the History view and retype the old value by hand. Nothing in
+the core restores a version: `history.ts` reads the log and nothing writes from
+it.
+
+A toast that reads *"Due date changed — Undo"* for a few seconds would cover the
+common case without touching git at all. The renderer already knows the field and
+its previous value at the moment of the edit, so undo is a second `updateItem`
+with the old value, and it lands in history as the ordinary edit it is. That is
+deliberate: a `git revert` would be cleverer, but it would rewrite the file under
+a watcher, fail on any vault without history, and read in the log as something
+other than a person changing their mind.
+
+What needs deciding is scope. The last edit only, or a short stack? Bulk edits
+count as one undo, and `BulkBar` knows the whole set. Comments cannot be undone
+at all, because the comment log has no remove (see "Removing a comment" below),
+so the toast should not be offered for them.
+
+## Say when a filter is hiding work, and remember the filters you left
+
+The toolbar holds seven independent narrowing controls: project, status,
+cadence, reporter, type chips, text, and Hide closed. Each one lives in its own
+`useState` in `App.tsx`, so a restart resets all of them to defaults. That is
+fine. The failure is the other direction: within a session, a type chip ticked on
+the board is still silently narrowing the board an hour later, and the only
+evidence is a card count that looks low. "Where did my task go" is the most
+common question a filtered tracker gets, and this one does not answer it.
+
+Two small pieces:
+
+- **A single "N filters on · Clear" chip** beside the toolbar whenever anything
+  is off its default. The board's zero-column empty state already proves the
+  pattern: it names the two controls that conflict rather than drawing nothing.
+- **Remembering the last filters per view** across restarts, in the settings file
+  main already writes (`vaultRoot`, `zoomLevel`, theme). Per view, because the
+  board filtered to one project and the backlog showing everything are both
+  normal, and one shared set would fight itself.
+
+**Saved views** are the natural third step: name a combination such as *ACME
+epics, next 30 days* and reach it from the sidebar or the palette. It belongs
+after the other two, because a saved view is a named copy of state that has to
+exist in one serialisable shape first.
+
+## Split the toolbar out of `App.tsx` before the next filter lands in it
+
+`App.tsx` is 1,480 lines. Around thirty `useState`s sit at the top, and the
+toolbar is a ternary on `view === "agenda"` that draws two different control
+sets. Three of the entries in this file add to that ternary: the agenda type
+filter, remembered filters, and saved views. The start-date and settled-recurring
+filters being built now add to it too. Each one is cheap on its own and pays the
+same tax: finding its place in a component that owns everything.
+
+The extraction is mechanical, which is why it is worth doing on its own branch
+first rather than folded into a feature. Move the filter state into one reducer
+(or one object in `useState`) plus a `<Toolbar>` component that takes it. A
+single filter-state shape is also exactly what "remember the filters" and "saved
+views" need to serialise, so the refactor is the first step of both.
+`ItemDetail.tsx`, at 1,111 lines, is the same shape of problem one panel over,
+but nothing on the roadmap is queued behind it.
+
+## Add a card from the column you want it in
+
+The board has no add affordance. `n` opens the create dialog with the project
+defaulted, and `+ new child` works from an open item, but a card made for the
+Blocked column is made in `todo` and then dragged. A small **+** at the top of
+each column (and each project lane when grouped) that opens the same dialog with
+status and project pre-filled would keep one create path, not two.
+
+One catch shapes it. `TRANSITIONS` decides which statuses a new item can start
+in, and creating straight into `done` or `in_review` is either illegal or a
+rollup question. The **+** should appear only on columns a new item can
+legitimately start in, which is the same "impossible, not empty" reasoning the
+board already uses to drop columns.
+
+## Show which fields a Claude draft guessed
+
+The draft box returns a filled form plus a free-text `notes` caveat. It does not
+say which fields came from the sentence and which were inferred, so the reviewer
+has to reread every field to find the one that was invented. The PLAN.md handoff
+names this as the failure most likely to go unnoticed: a resolved date that is
+wrong, a project picked by inference.
+
+The structured-output schema is ours, so the model can return a per-field
+`source: "stated" | "inferred"` alongside each value, and the dialog can mark the
+inferred ones, for example a dotted underline with the reason on hover. That
+turns the handoff checklist into something visible on every draft, rather than a
+test someone has to remember to run. It costs a schema change in `claude.ts` and
+a render pass in `CreateDialog.tsx`, and no core change, since provenance is never
+written to the item.
+
+## A weekly review: the items nobody has looked at
+
+The agenda answers *what is due*. Nothing answers *what has gone quiet*: open
+items untouched for weeks, drifted items waiting to be re-pushed, anything
+`blocked` for longer than a sprint, and an epic whose children are all closed but
+which is not closed itself. The data for all four already exists. Git history
+gives a last-touched date per file (the History view reads it), `sync.state`
+gives drift, and the rollup rules already know an epic's children.
+
+The shape is a sixth view, or an agenda scope, that walks those lists one item at
+a time with three buttons: *still relevant*, *reschedule*, *close* (or disregard).
+It should not be a report, because a report only lists the work where a review
+gets it done. Whether "untouched" means a commit touching the file, or only a
+change to certain fields, needs deciding first. A reorder in the backlog rewrites
+`rank`, and that should probably not count as looking at an item.
+
+## A nudge when something comes due, without opening the app
+
+Nothing in `apps/desktop/src` uses Electron's `Notification`. The agenda already
+computes the overdue and due-today sections every time it renders, so a
+once-a-morning *"2 overdue, 3 due today"* notification is a timer in main plus a
+call into code that already exists. Clicking it opens the agenda.
+
+What makes it harder than it looks: the app has to be running. So this is either
+"only while open", which is honest and small, or it pairs with a tray entry (next
+entry) so closing the window does not end the process. Settle that before
+building either one. Once only, not repeating, and switchable off in settings;
+a task app that nags gets muted.
+
+## Capture from anywhere: a global hotkey and a tray entry
+
+The fastest ways to add a task today are the CLI and an external Claude through
+`vault-capture`. That skill has been through more iterations than any other part
+of the capture story, which says where the friction is. Inside the app you first
+have to bring the window forward. Nothing uses `globalShortcut` or `Tray`.
+
+The shape is a system-wide shortcut that opens a small always-on-top window
+holding the create dialog's draft box. One sentence and Enter drafts it with
+Claude when a key is stored, or makes a bare todo when not, then the window
+vanishes. A tray icon gives the same entry point to the mouse and keeps the
+process alive for the notification above.
+
+Two decisions first. Which accelerator: something like `Ctrl+Alt+Space` that no
+common app claims, and remappable, since a global shortcut that collides fails
+silently on Windows. And whether closing the main window now hides it to the tray
+instead of quitting. That changes what the desktop shortcut and the new
+single-instance lock mean by "the app is running", so it should be decided with
+that lock in mind.
+
 ## Removing a comment, and detaching a copied attachment
 
 `vault_unlink_item` closed the link half of this; the other two have no inverse
@@ -197,9 +356,11 @@ in a warning, which is honest, but the remedy is still manual — edit Jira, the
 call `vault_mark_pushed` again to re-stamp the baseline. That call rebuilds
 `sync` from scratch (`Vault.markPushed`), so it wants `jiraKey` re-supplied and
 `jiraId` re-supplied too, or the id is silently dropped. No SCHEMA.md entry or
-tool description says any of this. There is also no CLI `mark-pushed` at all;
-`README.md` used to paper over that with a blanket claim of parity and now names
-it as a gap instead, which is honest but is not the same as closing it.
+tool description says any of this. The CLI half has narrowed since this was
+written: `vault jira record --from <file.csv>` (PR #53) stamps a whole import's
+worth of keys from the CSV Jira exports back out. That covers the bulk-create
+path. It does not cover re-stamping one hand-edited drifted item, which is still
+MCP-only.
 
 A smaller thing worth folding in whenever this is picked up: drift is one-way —
 `markDriftIfChanged` moves `pushed → drifted` and never back — so an item edited
@@ -374,61 +535,41 @@ effect of clicking Fix.
 
 ## A UI style guide, so the next screen matches the last one
 
-`index.css` is one file of nearly two thousand lines in twenty sections, and it
-is two different things stacked on top of each other. The colour layer is a real system: `:root`
-tokens for surfaces, text, priorities and statuses, several carrying the reason
-they are what they are — `--disregard` is warm on purpose, because at a 7px dot
-hue is most of what separates it from `--todo`'s cool grey. That thinking is
-worth writing down where someone designing the next screen will find it, rather
-than leaving it discoverable only by reading the stylesheet top to bottom.
+**Half of this is done — the colour half.** This entry used to spend most of its
+length on a light block that redefined twelve surface tokens and left every
+identity hue behind. That is fixed and enforced: see PLAN.md, "Identity colours
+are chosen against both grounds". `test/tokens.test.ts` now fails on a colour in
+`:root` with no light counterpart, a hardcoded colour literal outside the token
+blocks, or an identity token under 3:1 on any ground in either scheme. Do not
+redo it. The twelve `rgb(0 0 0 / …)` shadows and scrims were deliberately left
+as literals, with the reason recorded in the stylesheet.
 
-The spacing and type layer is not a system at all. Padding and gap values run
-5px, 6px, 7px, 8px, 9px, 10px, 11px, 12px, 14px with no rule for picking one, so
-every new component is a fresh guess and near-misses accumulate — the kind of
-drift nobody notices in isolation and everybody feels in aggregate. A short
-scale, even four or five steps, would make the choice mechanical.
+What is left is the layer that was never a system at all. `index.css` is now
+2,568 lines, and its padding, gap and margin values use twenty-three distinct
+pixel sizes — 1 through 14 nearly continuously, then 16, 18, 20, 24, 28, 32, 40,
+44, 48. `8px` is the clear favourite at 41 uses; `7px`, `9px` and `11px` sit at
+17, 16 and 8, which is the signature of values nudged by eye until something
+looked right rather than picked from a scale. Each is defensible alone. In
+aggregate it is why two panels built a month apart feel subtly unrelated, and
+every new component is a fresh guess. A short scale — `2 4 8 12 16 24 32`, as
+tokens — would make the choice mechanical, and the same test file that polices
+colour literals could police spacing literals once the migration is done.
 
-Thirteen colour values also sit outside the token blocks: three `color: #fff`,
-and ten `rgb(0 0 0 / …)` shadows and scrims at seven distinct alphas. Each is
-defensible alone. Together they are where a theme change silently misses — and
-per the next paragraph, one already has.
+Two things worth deciding alongside it rather than after:
 
-Which raises the decision this doc would have to settle, and it is not the one
-this entry used to describe. It claimed `color-scheme: dark` was hardcoded with
-no light mode and no seam to add one. That was wrong on the central fact:
-`index.css` has carried a `@media (prefers-color-scheme: light)` block since
-`004a8f3`, the first Electron commit, two days before this entry was written.
-It flips `color-scheme` and redefines the surfaces, borders, text and accent —
-`--bg` to `#f7f8fa`, `--bg-raised` to white, and so on down.
+- **The selected-row ground.** On a selected row the background becomes
+  `--accent-dim` and the grey identity tokens fall to about 2.4:1 — 1.5:1 for
+  `--lowest` in dark. The stylesheet records this as a question about
+  `--accent-dim` as a selection colour rather than about the greys. That makes it
+  a style-guide question, and the only colour issue still open.
+- **Type sizes.** Font sizes are the same story as spacing and have not been
+  counted. Count them before designing the scale, so one pass migrates both.
 
-So the real question is narrower and more awkward: that block is **partial**,
-and nothing says so. It redefines twelve tokens and leaves behind every status
-hue — `--todo`, `--in_progress`, `--in_review`, `--blocked`, `--done`,
-`--disregard` — plus `--highest`, `--high`, `--low` and `--overdue`, all of
-which keep values chosen against a near-black background. Of the five
-priorities only `--medium` and `--lowest` were adjusted.
+The colour thinking that is already right — `--disregard` warm on purpose, seven
+hues behind ten tokens, `--in_progress` tied to `--accent` in both schemes — is
+still discoverable only by reading `index.css` and PLAN.md. A short `STYLE.md`
+that names the tokens, the scales and the rule for adding either would be where
+someone designing the next screen actually looks.
 
-Worth knowing which kind of gap this is, because it decides the fix. Compare
-the block against its first version and the token list is identical — it has
-gained only the `color-scheme: light` line, no colours. So it was **born**
-covering surfaces and skipping identity colours, rather than drifting out of
-date. But there is one genuine drift on top, and it is the
-worst possible token to have missed. `--disregard` was added to `:root` in
-`e383a5b`, a day *after* light mode already existed, and got no light
-counterpart — the very token whose comment reasons about hue at a 7px dot,
-worked out against `#0f1115` and never checked against white. The warm/cool
-split against `--todo` probably survives, since neither value changed, but
-"probably" is the point: nobody has looked. The ten black scrims are the same
-problem with less excuse, since a shadow tuned for a dark surface is doing
-something else entirely on a light one.
-
-That makes it two fixes, not one. The drift wants a rule — a new colour token
-means a decision about both schemes — and the born-partial half wants the
-semantic split this entry always pointed at: which colours are surface-relative
-and which are identity. Dropping light mode is still the cheap option, and now
-means deleting a block rather than declining to write one. Keeping it means
-finishing a job that has been half-done, undocumented, and shipping since day
-one.
-
-Probably its own `PLAN-STYLE.md` rather than a phase — it is design work with a
-decision in it, not a task list.
+Still probably its own `PLAN-STYLE.md` rather than a phase, but it has shrunk
+from a design decision to a migration with a test at the end of it.
