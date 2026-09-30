@@ -2581,3 +2581,23 @@ test("writeFileAtomic writes, overwrites, creates missing directories, and leave
     "no .tmp-* file should survive either the first write or the overwrite",
   );
 });
+
+test("listItems filters by startDate the way it filters by dueDate", async () => {
+  const vault = await tmpVault();
+  const early = await vault.createItem({ project: "ACME", summary: "Early", startDate: "2026-09-01" });
+  const late = await vault.createItem({ project: "ACME", summary: "Late", startDate: "2026-11-01" });
+  await vault.createItem({ project: "ACME", summary: "Undated" });
+
+  const keys = (filter: Parameters<Vault["listItems"]>[0]): string[] =>
+    vault.listItems(filter).items.map((i) => i.key).sort();
+
+  assert.deepEqual(keys({ startBefore: "2026-10-01" }), [early.key]);
+  assert.deepEqual(keys({ startAfter: "2026-10-01" }), [late.key]);
+  // Inclusive at both ends, as the due filters are.
+  assert.deepEqual(keys({ startBefore: "2026-09-01" }), [early.key]);
+  assert.deepEqual(keys({ startAfter: "2026-11-01" }), [late.key]);
+  // An undated item matches neither side — "not scheduled" is asked for by
+  // leaving the filter out, never by a range that happens to include it.
+  assert.deepEqual(keys({ startBefore: "2099-01-01", startAfter: "2000-01-01" }), [early.key, late.key].sort());
+  assert.throws(() => vault.listItems({ startBefore: "next week" }));
+});

@@ -409,6 +409,8 @@ export class Vault {
       if (filter.open && DONE_STATUSES.includes(item.status)) return false;
       if (filter.dueBefore && (!item.dueDate || item.dueDate > filter.dueBefore)) return false;
       if (filter.dueAfter && (!item.dueDate || item.dueDate < filter.dueAfter)) return false;
+      if (filter.startBefore && (!item.startDate || item.startDate > filter.startBefore)) return false;
+      if (filter.startAfter && (!item.startDate || item.startDate < filter.startAfter)) return false;
       if (text) {
         const haystack = [
           item.summary,
