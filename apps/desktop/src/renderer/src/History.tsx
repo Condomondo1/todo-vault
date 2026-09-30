@@ -94,7 +94,12 @@ function FileRow({
         then does nothing is worse than one that plainly is not.
       */}
       {live && file.key && onSelect ? (
-        <button type="button" className="row history-row" onClick={() => onSelect(file.key!)}>
+        <button
+          type="button"
+          className="row history-row"
+          data-item-key={file.key}
+          onClick={() => onSelect(file.key!)}
+        >
           {label}
         </button>
       ) : (

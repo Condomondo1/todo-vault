@@ -164,6 +164,7 @@ export function Agenda({
                         type="button"
                         className="row"
                         aria-selected={key === selected}
+                        data-item-key={key}
                         onClick={() => onSelect(key)}
                       >
                         <span className="cell-key">{item.key}</span>

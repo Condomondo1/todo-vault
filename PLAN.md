@@ -4315,3 +4315,90 @@ Verified in `test/jira-mapping.test.ts`, 19 tests with 6 new. They cover:
 `jira-push`, `jira-push-pane` and `jira-settings` still pass. Not verified: a
 real Jira Cloud site, where the assignable search's results and Team's schema
 may differ from the fake's. That check is next, now that slice B is done.
+
+## A click beside the open item closes it, unless something would be lost ✅ built and driven
+
+The detail panel is fixed to the right with no backdrop, and the only ways out
+were its ✕ and Escape. Someone reading a card and wanting the board back had to
+travel to the ✕, or know about Escape. Every side panel people already use
+closes on a click in the empty space beside it, and now this one does too. The
+ask came with a condition, and it was the important half: only when nothing on
+the item is still outstanding.
+
+**Almost nothing in the panel is outstanding, so the rule is short.** Every
+field commits on blur, by design, so a click that blurs a field saves it rather
+than losing it. That leaves three cases. A field with focus: the first click
+leaves it, which commits, and the panel stays long enough to show that it did.
+The second click closes. That is the same rung Escape already climbs. An unsent
+comment: the click is refused, and a notice by the comment box says *post it or
+clear it, or close with ✕*. The ✕ stays the deliberate way out. A write in
+flight: the click does nothing, so an error from that write still has a panel
+to show in.
+
+**Only empty space closes. Everything else keeps its meaning.** A toolbar
+filter, the sidebar or the bulk bar does what it does, and the panel stays open.
+Someone narrowing the board while reading a card should not lose the card.
+Another item's card or row switches the panel, as it always has. The one change
+is that with a comment unsent it does not switch either, because switching
+loses the text as surely as closing. `ItemDetail` is mounted without a `key`,
+so the text would in fact have followed the person onto the next item, where
+posting it would comment on the wrong one.
+
+**The rules are one pure function, and App only wires it.**
+`outside-click.ts` decides `close`, `leave-field`, `stay` or `ignore` from
+plain facts: where the press and release landed, what was under them, whether
+a panel field had focus, whether a comment is unsent, and whether a write is
+busy. That is the part with tests (`test/outside-click.test.ts`). App holds three
+listeners on `document`, in the capture phase:
+
+- **Capture, because the card has to lose.** React's handlers sit on the root,
+  below `document`, so a capture listener runs first. That is the only way
+  "stay" can stop a card's `onClick` before it switches the panel. The e2e
+  shows it: with `stopPropagation` taken out, the unsent-comment check fails
+  because the panel moves to OPS-1.
+- **Focus is read at the press, not the click.** Pressing on empty space moves
+  focus off the field as its default action. By the time `click` fires, the
+  field has already let go, and "leave the field first" would never trigger.
+- **Both ends are classified, and the busier one wins.** A press in the panel
+  that ends on the board is a text selection, not a click. A card dragged to
+  another column fires `click` on the board, the nearest ancestor of both ends,
+  and would otherwise look like empty space.
+- **What changes mid-click is read through refs.** A blur that commits a field
+  flips `busy` between the press and the click. Re-registering the listeners
+  then would forget where the press landed.
+
+**Where the build moved off the plan.**
+
+- **Items are marked, not recognised by class.** The plan listed `.card, tr,
+  .cal-chip` among the controls. Each view's clickable item now carries
+  `data-item-key` instead: the board card, the backlog row, the agenda row, the
+  calendar chip and the history row. Matching one attribute means a restyled
+  view cannot quietly drop out, and it separates "another item" from "a
+  control". The rules need that distinction, because the calendar chip and the
+  agenda row are buttons too.
+- **Overlays are recognised by their backdrop too, not only by `overlaid`.**
+  The Jira push pane is a modal that App's `overlaid` flag does not include. A
+  click on `.modal-backdrop` or `.palette-backdrop` counts as the overlay's
+  whatever the flag says.
+- **No portals.** The plan asked to check whether the panel's menus render
+  outside `aside.detail`. None do, since nothing in the renderer uses
+  `createPortal`, so containment in the panel is the whole check.
+
+The plan's three questions went to the user, and each got the recommended
+answer. With a comment unsent, clicking another card stays rather than
+switches. The rule applies in all five views, not the board alone. A warning
+on ✕ for an unsent comment is a separate follow-up, now in IDEAS.md.
+
+**A finding the e2e forced.** At the harness's default window size, the panel
+covers the right-hand board columns and the right of the toolbar, including
+Hide closed. A card or a filter under it cannot be clicked by anyone. The spec
+widens the window to 1600×1000 and finds a card and a filter the panel leaves
+uncovered, rather than naming ones that may be hidden. That is how the panel
+has always behaved, and it is worth knowing when people ask why a filter will
+not respond.
+
+Verified: 12 unit tests; `e2e/detail-outside-click.e2e.mts` 7/7 on the board,
+and the full e2e suite 62/62. **Not verified:** the other four views were not
+driven. They share the listener, and all that differs between them is the
+`data-item-key` markup. Nobody has yet spent the plan's ten minutes of real use
+deciding whether "empty space" feels right on a busy board.

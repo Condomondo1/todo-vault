@@ -31,6 +31,13 @@ import { BOARD_ORDER, STATUS_LABELS, isClosed, knownPeople, knownReporters, toda
 import { BulkBar } from "./BulkBar";
 import { isLater } from "./later";
 import { JiraPush } from "./JiraPush";
+import {
+  classifyTarget,
+  isOnOverlay,
+  mergeTargets,
+  outsideClickAction,
+  type OutsideTarget,
+} from "./outside-click";
 
 type View = "backlog" | "board" | "agenda" | "calendar" | "history";
 
@@ -819,6 +826,96 @@ export function App(): React.JSX.Element {
     vault,
   ]);
 
+  /*
+    A click on empty space beside the open item closes it, unless that would
+    lose something. The rules are in outside-click.ts. This is only the wiring.
+
+    Capture phase, on document, so it runs before React's own handlers on the
+    root. That is what lets "stay" swallow a click on another card before the
+    card's onClick switches the panel and takes the unsent comment with it.
+
+    What changes while a click is in progress is read through a ref rather than
+    listed as a dependency. A blur that commits a field makes `busy` flip
+    between the press and the click, and re-registering then would forget
+    where the press landed.
+  */
+  const detailOpen = detailItem !== null;
+  const outstanding = useRef({ unsentComment: false });
+  const onOutstandingChange = useCallback((state: { unsentComment: boolean }) => {
+    outstanding.current = state;
+  }, []);
+  const [refusedClicks, setRefusedClicks] = useState(0);
+  const clickContext = useRef({ overlaid, busy: vault.busy });
+  clickContext.current = { overlaid, busy: vault.busy };
+
+  useEffect(() => {
+    if (!detailOpen) {
+      setRefusedClicks(0);
+      return;
+    }
+    const panel = (): Element | null => document.querySelector("aside.detail");
+    const inPanel = (node: EventTarget | null): boolean =>
+      node instanceof Node && Boolean(panel()?.contains(node));
+    const asElement = (node: EventTarget | null): Element | null =>
+      node instanceof Element ? node : null;
+
+    let press: { inside: boolean; onOverlay: boolean; target: OutsideTarget; typing: boolean } = {
+      inside: false,
+      onOverlay: false,
+      target: "empty",
+      typing: false,
+    };
+    let releaseInside = false;
+
+    // Where the press landed, and whether a panel field had focus, have to be
+    // read now: the press's default action moves focus off the field, so by
+    // the click it is already gone.
+    const onDown = (event: PointerEvent): void => {
+      const active = document.activeElement;
+      press = {
+        inside: inPanel(event.target),
+        onOverlay: isOnOverlay(asElement(event.target)),
+        target: classifyTarget(asElement(event.target)),
+        typing: inPanel(active) && isTypingTarget(active),
+      };
+    };
+    const onUp = (event: PointerEvent): void => {
+      releaseInside = inPanel(event.target);
+    };
+    const onClick = (event: MouseEvent): void => {
+      const target = asElement(event.target);
+      const action = outsideClickAction({
+        button: event.button,
+        downInside: press.inside,
+        upInside: releaseInside,
+        overlaid: clickContext.current.overlaid || press.onOverlay || isOnOverlay(target),
+        target: mergeTargets(press.target, classifyTarget(target)),
+        typingInPanel: press.typing,
+        unsentComment: outstanding.current.unsentComment,
+        busy: clickContext.current.busy,
+      });
+      if (action === "close") {
+        setDetailKey(null);
+      } else if (action === "leave-field") {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && inPanel(active)) active.blur();
+      } else if (action === "stay") {
+        event.preventDefault();
+        event.stopPropagation();
+        setRefusedClicks((n) => n + 1);
+      }
+    };
+
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("pointerup", onUp, true);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("pointerup", onUp, true);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [detailOpen]);
+
   const onProjectDrop = (target: ProjectSummary): void => {
     if (!dragProject || dragProject === target.key) return;
     const from = projectOrder.indexOf(dragProject);
@@ -1437,6 +1534,8 @@ export function App(): React.JSX.Element {
           }
           mutate={vault.mutate}
           attachPaths={vault.attachPaths}
+          refusedClicks={refusedClicks}
+          onOutstandingChange={onOutstandingChange}
         />
       )}
 

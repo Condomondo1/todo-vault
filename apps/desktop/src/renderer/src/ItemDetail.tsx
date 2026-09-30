@@ -55,6 +55,8 @@ export function ItemDetail({
   onPushToJira,
   mutate,
   attachPaths,
+  refusedClicks = 0,
+  onOutstandingChange,
 }: {
   item: Item;
   /** Everything this window admits exists, for the parent picker to choose from. */
@@ -84,6 +86,14 @@ export function ItemDetail({
     paths: string[],
     copy: boolean,
   ) => Promise<{ error: string | null; linkedInstead: string[] }>;
+  /**
+   * Bumped by App each time a click beside the panel was refused because a
+   * comment is unsent. Each bump shows the notice by the comment box and
+   * scrolls it into view, since the box can be far below the fold.
+   */
+  refusedClicks?: number;
+  /** What only this panel knows: whether a click away would lose typed text. */
+  onOutstandingChange?: (state: { unsentComment: boolean }) => void;
 }): React.JSX.Element {
   const [related, setRelated] = useState<{
     children: Item[];
@@ -113,6 +123,25 @@ export function ItemDetail({
   // its content once, at mount, so setComment("") alone would clear the state
   // and leave the typed text on screen. CreateDialog:63 has the same trick.
   const [commentGeneration, setCommentGeneration] = useState(0);
+  const unsentComment = comment.trim() !== "";
+  const commentFormRef = useRef<HTMLFormElement | null>(null);
+  const [showUnsentNotice, setShowUnsentNotice] = useState(false);
+
+  useEffect(() => {
+    onOutstandingChange?.({ unsentComment });
+  }, [unsentComment, onOutstandingChange]);
+  // Closing unmounts the panel with nothing unsent left behind it.
+  useEffect(() => () => onOutstandingChange?.({ unsentComment: false }), [onOutstandingChange]);
+
+  useEffect(() => {
+    if (refusedClicks === 0) return;
+    setShowUnsentNotice(true);
+    commentFormRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [refusedClicks]);
+  // Posted or cleared: the notice has nothing left to say.
+  useEffect(() => {
+    if (!unsentComment) setShowUnsentNotice(false);
+  }, [unsentComment]);
   const [linkDraft, setLinkDraft] = useState({ type: "url", target: "", label: "" });
   const [showLinkForm, setShowLinkForm] = useState(false);
   const [dropping, setDropping] = useState(false);
@@ -759,6 +788,7 @@ export function ItemDetail({
 
           <form
             className="comment-form"
+            ref={commentFormRef}
             onSubmit={(e) => {
               e.preventDefault();
               if (!comment.trim()) return;
@@ -775,6 +805,11 @@ export function ItemDetail({
               Comment
             </button>
           </form>
+          {showUnsentNotice && (
+            <div className="comment-unsent" role="status">
+              Unsent comment. Post it or clear it, or close with ✕.
+            </div>
+          )}
         </div>
 
         {/*
