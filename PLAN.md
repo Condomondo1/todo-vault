@@ -3254,7 +3254,7 @@ external Claude creating an item at the same moment as the app still goes
 through the same unguarded `.counters.json` read-modify-write. That race needs a
 lock in the core (an exclusive-create lockfile around `allocateKey`, or
 `createItem` refusing to overwrite an existing key file), and it belongs in its
-own change. It is recorded in IDEAS.md.
+own change. It got one: see "Two creates never share a key" below.
 
 Verified in `e2e/single-instance.e2e.mts`. The spec launches through the
 harness, minimizes the window, and spawns a bare second Electron against the
@@ -3545,3 +3545,74 @@ committed as `Update <key>`. The harness gained `git: false` and `env` options
 for it. Not driven in a real window: the dialog checkbox (a native message box
 Playwright cannot click), the Get git button, and the nested banner. The core
 tests cover the logic under all three.
+
+## Two creates never share a key ✅ built
+
+Found while measuring what two app windows do to one vault (see "One launch,
+one window"). Six creates fired together came back as `OPS-6, OPS-6, OPS-7…`.
+Both calls reported success, and one `OPS-6` was silently overwritten. The
+single-instance lock closed the easy way to reach this, but the app, the MCP
+server and the CLI are still three processes over one vault, and nothing
+serializes them against each other.
+
+**The item file is the reservation.** `allocateKey` still reads
+`.counters.json` and proposes a number, but the key belongs to whichever
+process *creates the file*. `createItem` now writes through
+`createFileExclusive`, which fails with `EEXIST` rather than replacing what is
+there. The loser comes back round with `allocateKey(project, above)`, a floor
+set to the key it just lost, so each retry makes progress even when neither
+its own index nor the counter has caught up with the other process. Twenty
+straight losses throw a `VaultError` that says so, since at that point
+something is broken rather than racing.
+
+**A hard link, not `wx`, so the atomic write survives.** `writeFileAtomic`
+exists so that a reader (the watcher in another window, an external Claude)
+sees the whole file or no file. `wx` would keep the exclusivity and lose that.
+`createFileExclusive` writes a temp file and then `link`s it into place:
+`link` refuses an existing target in one system call, and the file appears
+complete. Where the filesystem has no hard links (FAT, exFAT, some shares) it
+falls back to `wx`. That gives up whole-or-nothing visibility only for the
+milliseconds of the write, and never gives up exclusivity.
+
+**The same guard covers a case that was never a race.** An item file that is on
+disk but will not parse is missing from the index, so `highestOnDisk` did not
+count it, and the next create could be handed its key and write over the
+hand-edit someone was about to fix. The exclusive create now skips it. That
+case has its own test.
+
+**`.counters.json` became a hint, and is written like one.** The first run of
+the new race test failed on something else, twice over:
+
+- `writeFileAtomic`'s temp name was `pid` plus `Date.now()`, unique across
+  processes but not within one. Two writes to `.counters.json` in the same
+  millisecond shared a temp file, and the second rename failed with ENOENT. A
+  single core `Vault` taking concurrent calls (the MCP server can) would hit
+  the same thing. The name now carries eight random hex characters too.
+- On Windows, concurrent renames onto one file fail with `EPERM` while another
+  holds the target, and twelve creates at once used up `writeFileAtomic`'s
+  three quick retries. That was already true before this change: two processes
+  could fail a create outright over a bookkeeping file. It was just hidden
+  behind the duplicate keys.
+
+Now that uniqueness comes from the item file, the counter's only job is to keep
+a *deleted* item's key from being reissued. `advanceCounter` therefore re-reads
+before each write and only moves the counter up, so two processes no longer
+write it backwards. It retries up to eight times with jitter, and if every
+attempt fails it lets the create succeed anyway. The cost is a narrow window in
+which one key could be reissued after its item is deleted, and only if no other
+create in that project advanced the counter first. That was judged better than
+losing what the user typed.
+
+**Not covered: moving an item between projects.** `moveItemToProject` also
+allocates keys, and it writes them through `rekeyItems`, which still uses the
+replacing write. It is a rarer, confirmed operation, which leaves a narrower
+window, and giving it the same guard means making a multi-file re-key
+retryable part-way through. That is a change of its own if it is ever seen.
+
+Verified in `vault.test.ts`. Two `Vault` instances on one root, standing in for
+two processes, fire twelve creates alternately. The test asserts twelve
+distinct keys, then reads all twelve summaries back from a third, cold
+instance. With the exclusive write switched off, the same test fails on
+duplicate keys, so it does exercise the race. With it on, it passed 20 runs out
+of 20 after the counter change; before that change it had failed 6 of 10 on
+`EPERM`.

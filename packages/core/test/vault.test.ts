@@ -2675,6 +2675,53 @@ test("history is empty rather than an error without a repo or without commits", 
   assert.deepEqual(await vault.history({ project: "../etc" }), { entries: [], hasMore: false });
 });
 
+// ------------------------------------------------------- keys across processes
+
+/**
+ * Two `Vault` instances on one root stand in for two processes: the desktop
+ * app and the MCP server, say. Each has its own in-memory index, and nothing
+ * in one serializes the other, which is the whole of what makes two processes
+ * dangerous here. Measured first with two app windows: six creates came back
+ * `OPS-6, OPS-6, OPS-7...`, both calls succeeded, and one item was gone.
+ */
+test("two vaults creating at once never share a key, and nothing is overwritten", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vault-two-procs-"));
+  const first = await Vault.init(dir);
+  await first.createProject({ key: "ACME", name: "Acme" });
+  const second = await Vault.open(dir);
+
+  const created = await Promise.all(
+    Array.from({ length: 12 }, (_, n) =>
+      (n % 2 ? first : second).createItem({ project: "ACME", summary: `race ${n}` }),
+    ),
+  );
+
+  const keys = created.map((i) => i.key);
+  assert.equal(new Set(keys).size, keys.length, `keys were handed out twice: ${keys.join(", ")}`);
+
+  // Read back cold, from a third instance: every summary made it to disk.
+  const fresh = await Vault.open(dir);
+  const onDisk = fresh
+    .listItems({ project: "ACME", limit: 500 })
+    .items.map((i) => i.summary)
+    .sort();
+  assert.deepEqual(onDisk, created.map((i) => i.summary).sort());
+});
+
+test("a key whose file exists but will not parse is skipped, not overwritten", async () => {
+  const vault = await tmpVault();
+  await vault.createItem({ project: "ACME", summary: "One" });
+  // A hand-edit gone wrong: on disk, but not in the index, so the highest key
+  // the index knows is still ACME-1.
+  const broken = path.join(vault.root, "items", "ACME-2.md");
+  await fs.writeFile(broken, "---\nthis: [is not valid\n---\n");
+  await vault.load();
+
+  const next = await vault.createItem({ project: "ACME", summary: "Two" });
+  assert.equal(next.key, "ACME-3");
+  assert.equal(await fs.readFile(broken, "utf8"), "---\nthis: [is not valid\n---\n");
+});
+
 // ------------------------------------------------------------- atomic writes
 
 // Staging a real EPERM by holding a file handle open is not attempted here:

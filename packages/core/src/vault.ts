@@ -30,9 +30,12 @@ import {
 import {
   addDays,
   contentHash,
+  createFileExclusive,
   endOfMonth,
   formatZodError,
   fromPosixPath,
+  hasErrorCode,
+  isTransientRenameError,
   isSettledForWindow,
   nowIso,
   pathExists,
@@ -580,10 +583,10 @@ export class Vault {
    * silently disappears from every view and turns up in `load().errors`
    * instead. Cheaper to reject it here, where there is a caller to tell.
    */
-  private async writeAndIndex(next: Item): Promise<Item> {
+  private async writeAndIndex(next: Item, exclusive = false): Promise<Item> {
     const frontmatter = ItemFrontmatterSchema.parse(stripDescription(next));
     const item: Item = { ...frontmatter, description: next.description };
-    await this.writeItem(item);
+    await this.writeItem(item, exclusive);
     this.items.set(item.key, item);
     return item;
   }
@@ -653,7 +656,6 @@ export class Vault {
     }
     if (input.parent) this.assertParentValid(input.type, input.parent);
 
-    const key = await this.allocateKey(input.project);
     const now = nowIso();
 
     // An item can be born in_progress — CreateItemInput takes any status and
@@ -661,9 +663,8 @@ export class Vault {
     // stamp updateItem would have given it.
     const status = input.status ?? "todo";
 
-    const frontmatter = ItemFrontmatterSchema.parse({
+    const draft = {
       id: randomUUID(),
-      key,
       project: input.project,
       type: input.type,
       summary: input.summary,
@@ -685,15 +686,39 @@ export class Vault {
       links: (input.links ?? []).map((l) => ({ ...l, addedAt: l.addedAt ?? now })),
       attachments: [],
       comments: [],
-      sync: { state: "never" },
+      sync: { state: "never" as const },
       created: now,
       updated: now,
-    });
+    };
 
-    return this.persist(
-      { ...frontmatter, description: input.description ?? "" },
-      `Add ${key}: ${frontmatter.summary}`,
-    );
+    // Allocate, then claim the key by creating its file exclusively. Another
+    // process (the MCP server beside the app, say) can allocate the same number
+    // from the same `.counters.json`, because nothing serializes the two.
+    // Whichever creates the file first keeps the key, and the other comes back
+    // round from past it. The same guard stops a hand-broken item file, one
+    // that is on disk but missing from the index, from being written over.
+    let above = 0;
+    for (let attempt = 1; ; attempt++) {
+      const key = await this.allocateKey(input.project, above);
+      const frontmatter = ItemFrontmatterSchema.parse({ ...draft, key });
+      try {
+        const item = await this.writeAndIndex(
+          { ...frontmatter, description: input.description ?? "" },
+          true,
+        );
+        await this.commit(`Add ${key}: ${frontmatter.summary}`);
+        return item;
+      } catch (err) {
+        if (!hasErrorCode(err, "EEXIST")) throw err;
+        if (attempt >= MAX_KEY_ATTEMPTS) {
+          throw new VaultError(
+            `Could not find a free key in ${input.project} after ${attempt} tries. ` +
+              `Something else is creating items there as fast as this can.`,
+          );
+        }
+        above = Number.parseInt(key.slice(input.project.length + 1), 10);
+      }
+    }
   }
 
   /**
@@ -2101,14 +2126,20 @@ export class Vault {
 
   // ---------------------------------------------------------------- persistence
 
-  private async writeItem(item: Item): Promise<void> {
+  /**
+   * `exclusive` is for a key that has just been allocated: the write then
+   * refuses to replace a file that is already there, which is what turns a lost
+   * race for a key into a retry rather than an overwritten item.
+   */
+  private async writeItem(item: Item, exclusive = false): Promise<void> {
     const { description, ...frontmatter } = item;
     const text = serializeFrontmatter(
       frontmatter as unknown as Record<string, unknown>,
       description,
       FRONTMATTER_ORDER,
     );
-    await writeFileAtomic(this.itemPath(item.key), text);
+    const target = this.itemPath(item.key);
+    await (exclusive ? createFileExclusive(target, text) : writeFileAtomic(target, text));
   }
 
   private async writeProject(project: Project): Promise<void> {
@@ -2138,7 +2169,12 @@ export class Vault {
     await writeFileAtomic(this.countersPath, `${JSON.stringify(counters, null, 2)}\n`);
   }
 
-  private async allocateKey(projectKey: string): Promise<string> {
+  /**
+   * `above` is a floor for a retry. A key lost to another process is known to
+   * be taken even though neither this process's index nor `.counters.json`
+   * necessarily says so yet, so the next attempt has to start past it.
+   */
+  private async allocateKey(projectKey: string, above = 0): Promise<string> {
     const counters = await this.readCounters();
 
     let highestOnDisk = 0;
@@ -2148,10 +2184,45 @@ export class Vault {
       if (Number.isFinite(n) && n > highestOnDisk) highestOnDisk = n;
     }
 
-    const next = Math.max(counters[projectKey] ?? 0, highestOnDisk) + 1;
-    counters[projectKey] = next;
-    await this.writeCounters(counters);
+    const next = Math.max(counters[projectKey] ?? 0, highestOnDisk, above) + 1;
+    await this.advanceCounter(projectKey, next);
     return `${projectKey}-${next}`;
+  }
+
+  /**
+   * Record that `next` has been handed out, so a later delete cannot free it.
+   *
+   * Since `createItem` claims its key by creating the item file exclusively,
+   * this counter is no longer what stops two processes sharing a key. What it
+   * still does is keep a deleted item's key from being reissued. So it is
+   * written with more care than an item and allowed to fail more quietly:
+   *
+   * - **Merged, not replaced.** It is re-read just before each write and only
+   *   ever moves up. Two processes that read the same old value no longer write
+   *   the counter backwards.
+   * - **Retried longer than `writeFileAtomic` retries.** Concurrent renames onto
+   *   one file fail with `EPERM` on Windows while another holds the target.
+   *   Twelve creates at once exhausted the usual three attempts. The jitter is
+   *   so that contenders stop retrying in lockstep.
+   * - **Never fatal.** If every attempt fails, the item is still created. The
+   *   cost is a narrow chance that this one key is reissued after its item is
+   *   deleted, and only if no other create in the project advances the counter
+   *   first. Failing the create would lose the user's input to save a
+   *   bookkeeping file.
+   */
+  private async advanceCounter(projectKey: string, next: number): Promise<void> {
+    for (let attempt = 1; attempt <= COUNTER_WRITE_ATTEMPTS; attempt++) {
+      const counters = await this.readCounters();
+      if ((counters[projectKey] ?? 0) >= next) return;
+      counters[projectKey] = next;
+      try {
+        await this.writeCounters(counters);
+        return;
+      } catch (err) {
+        if (!isTransientRenameError(err)) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 5 + Math.random() * 20 * attempt));
+      }
+    }
   }
 
   /**
@@ -2182,6 +2253,17 @@ export class Vault {
 }
 
 // ------------------------------------------------------------------ helpers
+
+/**
+ * How many keys `createItem` will try before giving up. Each lost race moves
+ * the floor past the key that was lost, so hitting this means twenty keys in a
+ * row were taken between allocation and write. That is not a race any more;
+ * it is something broken, and it should be said rather than retried forever.
+ */
+const MAX_KEY_ATTEMPTS = 20;
+
+/** See `advanceCounter`: enough to outlast a burst of concurrent creates. */
+const COUNTER_WRITE_ATTEMPTS = 8;
 
 const PRIORITY_RANK: Record<string, number> = {
   highest: 0,
