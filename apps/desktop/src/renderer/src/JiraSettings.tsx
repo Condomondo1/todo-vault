@@ -11,9 +11,10 @@ const TOKEN_PAGE = "https://id.atlassian.com/manage-profile/security/api-tokens"
  * which site and email, never what the token is. Replace re-enters all three
  * fields rather than the token alone, because main stores them as one pair.
  *
- * Test connection, the project picker and the field mapping arrive with the
- * Jira client (slice A of the push plan). Until then a stored credential reads
- * as "not verified yet", which is true, rather than claiming anything about it.
+ * Connect asks Jira who the pair belongs to before anything is stored, so a
+ * saved credential is one that worked at least once. Test connection asks
+ * again later, because tokens expire, and an expired one should show up here
+ * rather than halfway through a push.
  */
 export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.Element {
   const [status, setStatus] = useState<JiraStatus | null>(null);
@@ -26,6 +27,10 @@ export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.El
   });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Which action is in flight, so the right button says what it is waiting on. */
+  const [pending, setPending] = useState<"connect" | "test" | "remove" | null>(null);
+  /** A short confirmation after a Test connection that passed. */
+  const [confirmed, setConfirmed] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -48,11 +53,17 @@ export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.El
   }, [onClose]);
 
   /** Both mutations answer with a fresh status, so nothing has to re-fetch. */
-  const run = async (call: () => Promise<Result<JiraStatus>>): Promise<void> => {
+  const run = async (
+    which: "connect" | "test" | "remove",
+    call: () => Promise<Result<JiraStatus>>,
+  ): Promise<void> => {
     setBusy(true);
+    setPending(which);
     setError(null);
+    setConfirmed(null);
     const result = await call();
     setBusy(false);
+    setPending(null);
     if (!result.ok) {
       setError(result.message);
       return;
@@ -60,13 +71,14 @@ export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.El
     setStatus(result.value);
     setDraft((d) => ({ ...d, token: "" }));
     setEntering(false);
+    if (which === "test") setConfirmed("Jira accepted the stored token.");
   };
 
   const credential = status?.credential;
   const showForm = status?.storageAvailable && (!credential || entering);
   const complete = Boolean(draft.site.trim() && draft.email.trim() && draft.token.trim());
   const save = (): void => {
-    if (complete && !busy) void run(() => window.vault.setJiraCredentials(draft));
+    if (complete && !busy) void run("connect", () => window.vault.setJiraCredentials(draft));
   };
 
   const set = (patch: Partial<JiraCredentialInput>): void => setDraft((d) => ({ ...d, ...patch }));
@@ -85,7 +97,8 @@ export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.El
         <div className="modal-body">
           <p className="field-note">
             Connect once, and the app can create issues in one Jira Cloud project from items you
-            review first. Nothing is sent from here: this only stores the connection.
+            review first. Connecting only asks Jira whose token this is; nothing about your items
+            is sent from here.
           </p>
 
           {!status && !error && <p className="field-note">Checking…</p>}
@@ -100,7 +113,7 @@ export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.El
                 {!status.storageAvailable
                   ? "Unavailable on this machine"
                   : credential
-                    ? `${credential.email} on ${new URL(credential.site).host}`
+                    ? `${credential.accountName ? `${credential.accountName} · ` : ""}${credential.email} on ${new URL(credential.site).host}`
                     : "Not connected"}
                 <span className="spacer" />
                 {credential && (
@@ -214,6 +227,7 @@ export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.El
             </>
           )}
 
+          {confirmed && <p className="field-note jira-confirmed">{confirmed}</p>}
           {error && <div className="modal-error">{error}</div>}
         </div>
 
@@ -223,9 +237,16 @@ export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.El
               <button
                 className="btn btn-danger"
                 disabled={busy}
-                onClick={() => void run(() => window.vault.clearJiraCredentials())}
+                onClick={() => void run("remove", () => window.vault.clearJiraCredentials())}
               >
                 Remove
+              </button>
+              <button
+                className="btn"
+                disabled={busy}
+                onClick={() => void run("test", () => window.vault.testJiraConnection())}
+              >
+                {pending === "test" ? "Asking Jira…" : "Test connection"}
               </button>
               <button
                 className="btn"
@@ -256,7 +277,7 @@ export function JiraSettings({ onClose }: { onClose: () => void }): React.JSX.El
           )}
           {showForm && (
             <button className="btn btn-primary" disabled={busy || !complete} onClick={save}>
-              {busy ? "Saving…" : "Save"}
+              {pending === "connect" ? "Asking Jira…" : "Connect"}
             </button>
           )}
           <button className="btn" onClick={onClose}>

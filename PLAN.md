@@ -3940,3 +3940,72 @@ app and confirms that, with no credential saved, main's refusal is shown and
 the create button is disabled. **Not verified:** no issue has been created by
 this code in any Jira, fake or real. C2 covers the fake, and the plan's one
 hand-run push covers the real one.
+
+## Jira, part B2a: Connect proves the pair, and a fake Jira speaks real HTTPS ✅ built and driven
+
+B1 stored a connection and could say nothing about it. With slice A1's client
+on main, B2a makes the credential mean something. **Connect** asks Jira
+`GET /rest/api/3/myself` before anything is stored, and **Test connection** asks
+again later. The mapping half of Settings → Jira is B2b, built on A2's
+`writeJiraMap`.
+
+**Verify, then store, never the other way round.** A pair Jira refuses is
+never written, so a stored credential is always one that worked at least once.
+Storing first would have left a wrong token sitting there looking configured,
+and the first push would have been the moment that showed. The cost is that a
+connection cannot be saved while Jira is unreachable. That is also a moment
+when nothing could be done with one, so it was accepted. Test connection on a
+stored pair works the other way: a failure leaves the credential, and its last
+`verifiedAt`, exactly as they were. That way an expired token reads as expired,
+with the date it last worked, and does not vanish.
+
+**Everything that talks to Jira is the core's client.** `verifyCredential` in
+`jira-credential.ts` decides only what to ask and what to keep. For a scoped
+token it calls `resolveCloudId` once, unauthenticated, and keeps the id in the
+blob, so later checks and slice C's push go straight to the gateway. It keeps
+Jira's `displayName` as `accountName` too, so the panel reads "Dan Okafor ·
+me@acme.com on acme.atlassian.net" and not an email alone. An email is what
+was typed, and a display name is Jira's own answer about whose token it is.
+There was a suggestion to write a minimal fetch in main while the client was
+still being built. It was turned down, because a second fetch path is how the
+client's rules (https only, `redirect: "error"`, origin pinning, token-free
+errors) would start to drift.
+
+**One message is reworded, and only on first Connect.** The client's 401 says
+"Jira rejected the *stored* token — it may have expired". That is right for
+Test connection and for a push, and wrong on Connect, where nothing is stored
+yet and the likelier causes are a token pasted short or an email that does not
+own it. `forFirstConnect` rewrites that one case. Every other failure (network,
+redirect, forbidden) already reads correctly and passes through unchanged.
+
+**The fake Jira is real HTTPS, because the client allows nothing else.**
+`e2e/fake-jira.mts` starts an HTTPS server on 127.0.0.1 with a throwaway
+self-signed certificate made by `openssl` at start. The app trusts it through
+`NODE_EXTRA_CA_CERTS`, passed with the harness's `env` option. That rests on
+one fact, checked with a scratch launch before anything was built on it:
+**Electron's main-process `fetch` honours `NODE_EXTRA_CA_CERTS`** the way any
+Node process does. Without that, the only way to test against a fake would
+have been an `http:` escape hatch in `normaliseBaseUrl`, which is exactly the
+hole the rule exists to close, opened for tests. The fake checks Basic auth on
+every request and answers a mismatch with Jira's own 401 shape. So a passing
+spec is also proof the app sent the right pair. It serves `/myself` out of the
+box, and `route()` lets a spec add the rest, which is how slice C's push spec
+extends it rather than building a second one. Two limits: the site is
+`https://localhost:<port>`, so a scoped token (addressed through
+`api.atlassian.com`, a fixed host) cannot be faked and is unit-tested over a
+fake `fetch` instead. And a machine without `openssl` on `PATH` skips the spec
+with that reason given, rather than passing it silently. Under Git Bash the
+certificate subject needs `MSYS_NO_PATHCONV=1`, or `/CN=localhost` is rewritten
+into a Windows path.
+
+Verified in `test/jira-credential.test.ts` and `e2e/jira-settings.e2e.mts`. The
+unit tests cover: a classic token goes to the site with the right Basic header;
+a scoped token resolves the cloud id once, without credentials, keeps it, and
+uses the gateway; a 401 carries no token; the blob round-trips the new fields;
+and the first-Connect rewording. The e2e spec runs against the fake. An `http:`
+site is refused with no request sent at all. A wrong token draws one refused
+`/myself`, the first-Connect message, and no file. The right token is verified,
+then stored encrypted, and the account is named. Test connection sends one
+more authorized `/myself`. Replace keeps the site and email. Remove deletes the
+file. Not verified: a real Jira Cloud site, and the scoped-token scope names.
+Both stay on the plan's list for the manual check before slice C is done.

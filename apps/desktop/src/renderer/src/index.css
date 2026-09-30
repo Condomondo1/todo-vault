@@ -2623,6 +2623,10 @@ kbd.pill {
   color: var(--text-dim);
 }
 
+.jira-confirmed {
+  color: var(--done);
+}
+
 /* An external link that has to go through main (openTarget), so it is a
    button dressed as a link rather than an <a> the window would navigate. */
 .link-button {
