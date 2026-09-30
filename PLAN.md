@@ -4122,3 +4122,91 @@ runs two `Vault` instances on one root: four sequential moves into OPS against
 eight concurrent creates there, then a cold read that expects all twelve
 summaries. With the claim switched back to the replacing write, all three
 failed in 5 runs out of 5. With it on, the race test passed 15 out of 15.
+
+## Jira, part B2b-1: the mapping is chosen in the app ✅ built and driven
+
+B2a proved the credential. B2b-1 puts it to work. Settings → Jira gains a
+**Mapping** tab that reads one project's issue types and create screens with
+the stored credential, offers only what that project has, and saves the choice
+into the vault's `jira-map.yaml` through A2's `writeJiraMap`, committed as
+"Update Jira mapping". Extra fields and people are B2b-2.
+
+**Tabs, not one long panel.** The first version put the mapping under the
+connection in one scrolling modal. That was turned down before it landed, in
+favour of Connection and Mapping tabs. The connection is set once, and the
+mapping is revisited whenever the project changes, so each gets its own short
+view. The modal is one width (640px) for both, so switching never resizes it.
+Mapping is disabled until a credential is stored, and again while Replace is
+open, because everything it does asks Jira with that pair. It stays mounted
+while hidden, so a project loaded on Mapping is still there after a look at
+Connection. Remove, Test connection and Replace belong to Connection and show
+only there.
+
+**The renderer says what it picked, and main decides what is written.** The
+panel sends a `JiraMappingChoice`: a project key, five issue type names and
+three field ids. `mappingEdits` in `main/jira-mapping.ts` turns that into map
+edits, and it writes `baseUrl`, `auth` and `cloudId` from the verified
+credential, never from the choice. So the push's own check, that the map's
+site is the token's site, holds by construction for any map saved here, and
+nothing the renderer sends can aim the token somewhere else. `cloudId` is
+deleted for a classic token rather than left behind by an earlier scoped one.
+The key and field ids are checked against Jira's shapes before anything is
+written, so a `../` or a stray space is refused in main and not merely
+avoided by the dropdowns.
+
+**Edits are paths, never blocks.** `writeJiraMap` keeps the comments on a
+block only if the block is edited key by key. Replacing `fields` whole would
+have dropped its explanations, and also `epicLink`, which this panel does not
+show. So each Save touches `issueTypes.<type>` and `fields.<name>` one at a
+time, and leaves `priorities`, `statusTransitions`, `extraFields` and `people`
+alone. A first Save writes from the commented example, so the file a person
+opens later still explains itself.
+
+**Gaps are computed in main, from metadata already fetched.** A gap is a
+required field, with no default, on a mapped issue type that no item could
+ever fill under this map. `mappingGaps` holds `requiredGaps` against #67's
+`fieldsTheMapCanFill` for each distinct mapped type, so bug and task both on
+Task is one set of gaps and not two. Main caches the last project metadata
+the panel loaded, tagged with the credential's site. A load or save of the
+map returns gaps whenever that cache matches, and after Replace moves to
+another site the cache answers nothing rather than something wrong. The panel
+re-reads the map after loading a project, so the saved mapping's gaps appear
+before anything is changed. It says "Story requires Team, which nothing fills
+in", which is the same blocker the push would raise, but shown at setup rather
+than at send. Gaps are for the *saved* map on purpose: they answer what a
+push would do now, not what unsaved picks might do.
+
+**The panel only offers what could work.** Each vault type's dropdown lists
+the project's own issue types, and subtask types appear only for the vault's
+subtask. That's because Jira refuses a parentless subtask and a parented story
+alike. Field dropdowns list only fields of the right kind that are on at least
+one chosen type, labelled with the types they are on. A saved choice the
+project no longer offers stays visible and marked, rather than silently
+blanked. Loading guesses the usual names (Epic, Story, Task, Bug,
+Subtask/Sub-task). A type with no match, such as Bug in a team-managed project
+without one, is left blank, and Save waits until someone chooses.
+
+Verified in `test/jira-mapping.test.ts` and `e2e/jira-mapping.e2e.mts`. The
+unit tests cover:
+- edits are paths, and none replaces a whole block
+- the site and auth come from the credential, even when the choice tries to carry them
+- `cloudId` is written for a scoped token and removed for a classic one
+- a bad key, field id or category, or a missing type, is refused
+- a real `writeJiraMap` round trip keeps a comment inside `fields` and leaves `epicLink` and `extraFields` alone
+- gaps: named once per type, never for defaulted, always-sent or parent fields, closed by an extra field only on its own types, and undefined for another project's metadata
+
+The e2e runs against the fake ENG from `fake-jira-project.mts`. Mapping stays
+disabled until Connect succeeds. ENG loads from a typed "eng". Bug is left
+blank and Save is disabled until it is chosen. The subtask dropdown offers
+only Subtask. A loaded project survives a trip to Connection. The saved file
+starts from the commented example, has `baseUrl` equal to the fake's site, and
+does not contain the token. The last commit is "Update Jira mapping" with
+nothing left uncommitted. Story's Team gap is the only one shown. Replace
+disables Mapping. Reopened, the panel reads the saved map back, keeps Bug on
+Task, and shows the gap again. Not verified: a real Jira Cloud site, which
+stays on the list for the manual check after slice B.
+
+**One trap for the next spec.** A `<select>` inside its `<label>` takes the
+selected option into its accessible name, so the Epic select is named "Epic
+Epic". An exact `getByLabel` then never matches, and the spec finds selects by
+their caption instead.

@@ -16,6 +16,7 @@ import {
   createJiraClient,
   normaliseBaseUrl,
   resolveCloudId,
+  type JiraClient,
   type JiraMyself,
 } from "todo-vault";
 
@@ -133,6 +134,33 @@ export function summarise(stored: StoredJiraCredential): JiraCredentialSummary {
 }
 
 /**
+ * The core's client for a stored credential, and the cloud id it needed.
+ *
+ * The one place a stored credential becomes a client, so Connect, Test
+ * connection and the mapping panel all reach Jira the same way. A scoped token
+ * uses the cloud id kept in the credential, and resolves it only when there is
+ * none. The id comes back so a caller that stores the credential can keep it.
+ */
+export async function openClient(
+  stored: StoredJiraCredential,
+  deps: { fetch?: typeof fetch } = {},
+): Promise<{ client: JiraClient; cloudId?: string }> {
+  const cloudId =
+    stored.auth === "scoped"
+      ? (stored.cloudId ?? (await resolveCloudId(stored.site, deps.fetch)))
+      : undefined;
+  const client = createJiraClient({
+    site: stored.site,
+    auth: stored.auth,
+    cloudId,
+    email: stored.email,
+    token: stored.token,
+    ...(deps.fetch ? { fetch: deps.fetch } : {}),
+  });
+  return { client, ...(cloudId ? { cloudId } : {}) };
+}
+
+/**
  * Prove the pair by asking Jira who it belongs to (`GET /rest/api/3/myself`),
  * and return the credential stamped with the answer.
  *
@@ -146,18 +174,7 @@ export async function verifyCredential(
   stored: StoredJiraCredential,
   deps: { fetch?: typeof fetch; now?: () => Date } = {},
 ): Promise<{ stored: StoredJiraCredential; account: JiraMyself }> {
-  const cloudId =
-    stored.auth === "scoped"
-      ? (stored.cloudId ?? (await resolveCloudId(stored.site, deps.fetch)))
-      : undefined;
-  const client = createJiraClient({
-    site: stored.site,
-    auth: stored.auth,
-    cloudId,
-    email: stored.email,
-    token: stored.token,
-    ...(deps.fetch ? { fetch: deps.fetch } : {}),
-  });
+  const { client, cloudId } = await openClient(stored, deps);
   const account = await client.myself();
   return {
     stored: {

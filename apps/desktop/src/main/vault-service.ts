@@ -4,8 +4,12 @@ import { EventEmitter } from "node:events";
 
 import chokidar, { type FSWatcher } from "chokidar";
 import {
+  jiraMapPath,
   syncedRootFor,
   Vault,
+  writeJiraMap,
+  type JiraMap,
+  type JiraMapEdit,
   type BulkUpdateResult,
   type DeleteResult,
   type HistoryPage,
@@ -317,6 +321,20 @@ export class VaultService extends EventEmitter {
    */
   read<T>(fn: (vault: Vault) => T): T {
     return fn(this.requireVault());
+  }
+
+  /**
+   * Write `jira-map.yaml` and commit it, as one queued write. It is a file in
+   * the vault like any other, and the commit is a `git add -A`. Unqueued, it
+   * could race an item write's own commit for `index.lock`, or be swept into
+   * that commit under the item's message.
+   */
+  saveJiraMap(edits: readonly JiraMapEdit[]): Promise<JiraMap> {
+    return this.write(async (v) => {
+      const map = await writeJiraMap(jiraMapPath(v.root), edits);
+      await v.commitChange("Update Jira mapping");
+      return map;
+    });
   }
 
   /** Record that an item now exists in Jira. Queued like every other write. */
