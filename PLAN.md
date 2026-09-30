@@ -3603,11 +3603,11 @@ which one key could be reissued after its item is deleted, and only if no other
 create in that project advanced the counter first. That was judged better than
 losing what the user typed.
 
-**Not covered: moving an item between projects.** `moveItemToProject` also
-allocates keys, and it writes them through `rekeyItems`, which still uses the
-replacing write. It is a rarer, confirmed operation, which leaves a narrower
-window, and giving it the same guard means making a multi-file re-key
-retryable part-way through. That is a change of its own if it is ever seen.
+**Not covered at first: moving an item between projects.** `moveItemsToProject`
+also allocates keys, and it wrote them through `rekeyItems`, which still used
+the replacing write. Giving it the same guard meant making a multi-file re-key
+retryable part-way through, so it was left as a change of its own. It got one:
+see "A move never overwrites a racing create" below.
 
 Verified in `vault.test.ts`. Two `Vault` instances on one root, standing in for
 two processes, fire twelve creates alternately. The test asserts twelve
@@ -4065,3 +4065,60 @@ the fake cannot tell us is which list key a live site sends (`issueTypes` or
 `values`, both accepted), whether a real Team or Sprint field takes what the
 raw-JSON box sends, and the scope names on a real scoped token. That is the
 plan's one hand-run push, and it is the next step.
+
+## A move never overwrites a racing create ✅ built
+
+"Two creates never share a key" closed the race for `createItem` and left one
+path open. `moveItemsToProject` hands out fresh keys in the target project, and
+`rekeyItems` wrote them with the replacing write. So an MCP server creating in
+OPS while the app moved an epic into OPS could be handed the same number, and
+whichever wrote second silently replaced the other's item. A stray file that
+would not parse got the same treatment. The guard is the same as the one on
+create: a new key is claimed by creating its file exclusively. What changed is
+the order of the work around it.
+
+**Claim first, so a lost claim has nothing to undo.** A re-key touches many
+files: the moved items' new homes, their attachment folders, every other item
+whose parent or links named them, and the files left behind. The reason this
+was deferred was that a race lost part-way through that would leave a
+half-moved subtree. So `rekeyItems` now writes every *new* home first, before
+it moves an attachment folder, rewrites a reference, or deletes anything. If
+one claim finds a file already there, the only changes made so far are the
+files this call just created. Those are removed, the index entries go with
+them, and it throws `KeyTakenError` naming the key. The vault is exactly as it
+was.
+
+**The move comes back round; a rename does not need to.** `moveItemsToProject`
+catches `KeyTakenError`, re-allocates the whole subtree from past the lost key,
+and tries again, with the same twenty-attempt ceiling as `createItem`.
+`renameProject` fixes its numbers (ACME-7 becomes NEW-7), so there is nothing
+to retry. There the error reaches the caller as a `VaultError` that says a file
+is in the way and nothing changed, instead of the old silent overwrite. A key
+that another item in the same mapping is vacating is already this call's own,
+and keeps the replacing write. No caller builds such a chain today, but
+`rekeyItems` permits one.
+
+**Attachment folders now move after the claims, not before.** They used to go
+first, so the paths an item records would point at something real once its file
+landed. Now there is a moment where a claimed file names a folder that is still
+arriving. The alternative was moving folders first and renaming them back on a
+lost claim. That fails in exactly the conditions where it would be needed:
+a rename on Windows can fail with `EPERM` while something holds the folder open.
+A brief dangling path that fixes itself was judged better than a rollback
+that can strand the folder.
+
+**Each key floors the next.** The subtree used to call `allocateKey(target)`
+once per member with no floor. `allocateKey` counts on `.counters.json`
+advancing between calls, and since the create fix that write is allowed to fail
+quietly. If it did, two members of one subtree could be handed the same number.
+Now each allocation passes the previous key as its floor, so distinct keys no
+longer depend on the counter.
+
+Verified in `vault.test.ts` by three tests. In the first, a subtree of two lands
+on a broken OPS-2: OPS-1 is claimed, then given back, and the move lands as
+OPS-3 and OPS-4 with the broken file untouched and no OPS-1 left behind. In
+the second, a rename onto a stray NEW-2 refuses and changes nothing. The third
+runs two `Vault` instances on one root: four sequential moves into OPS against
+eight concurrent creates there, then a cold read that expects all twelve
+summaries. With the claim switched back to the replacing write, all three
+failed in 5 runs out of 5. With it on, the race test passed 15 out of 15.
