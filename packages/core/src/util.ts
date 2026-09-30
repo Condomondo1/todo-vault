@@ -127,7 +127,7 @@ async function renameWithRetry(tmp: string, filePath: string): Promise<void> {
  */
 export async function writeFileAtomic(filePath: string, contents: string): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  const tmp = tempPathFor(filePath);
   try {
     await fs.writeFile(tmp, contents, "utf8");
     await renameWithRetry(tmp, filePath);
@@ -135,6 +135,60 @@ export async function writeFileAtomic(filePath: string, contents: string): Promi
     await fs.rm(tmp, { force: true }).catch(() => {});
     throw err;
   }
+}
+
+/**
+ * A temp name beside `filePath` that no other write will pick.
+ *
+ * It was `pid` plus `Date.now()`, which is unique across processes but not
+ * within one. Two writes to the same file in the same millisecond, such as two
+ * `createItem` calls racing to update `.counters.json`, shared a temp file, and
+ * the second rename failed with ENOENT because the first had already moved it.
+ * The `.tmp-` marker is kept, since the desktop watcher ignores on it.
+ */
+function tempPathFor(filePath: string): string {
+  return `${filePath}.tmp-${process.pid}-${Date.now()}-${randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * Create a file that must not already exist, atomically. Rejects with the
+ * `EEXIST` code if something is already there, and then leaves it untouched.
+ *
+ * `writeFileAtomic` cannot do this, because a rename replaces its target. That
+ * is how two processes handed the same key both "succeeded": the second rename
+ * silently replaced the first item. A hard link from a temp file keeps both
+ * properties at once. Readers see the whole file or no file, and `link` refuses
+ * an existing target in a single system call, so the check and the create
+ * cannot be split by another process.
+ *
+ * Some filesystems (FAT, exFAT, certain network shares) have no hard links.
+ * There it falls back to an exclusive `wx` write, which gives up only
+ * whole-or-nothing visibility to readers, and only for the milliseconds the
+ * write takes.
+ */
+export async function createFileExclusive(filePath: string, contents: string): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tmp = tempPathFor(filePath);
+  try {
+    await fs.writeFile(tmp, contents, "utf8");
+    try {
+      await fs.link(tmp, filePath);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "EEXIST" || !NO_HARD_LINKS.has(code ?? "")) throw err;
+      await fs.writeFile(filePath, contents, { encoding: "utf8", flag: "wx" });
+    }
+  } finally {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+  }
+}
+
+/** What `link` fails with where the filesystem has no hard links to make. */
+const NO_HARD_LINKS = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV", "EINVAL"]);
+
+/** Whether `err` is a filesystem error with this code. */
+export function hasErrorCode(err: unknown, code: string): boolean {
+  return err instanceof Error && (err as NodeJS.ErrnoException).code === code;
 }
 
 export async function pathExists(p: string): Promise<boolean> {

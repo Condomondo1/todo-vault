@@ -8,23 +8,6 @@ for the shape of one of those).
 Newest at the top. No status tracking here — once something's picked up, its
 entry moves out to wherever it's being built.
 
-## Two processes creating at once can be handed the same key
-
-Measured while building the single-instance lock (PLAN.md, "One launch, one
-window"). Six creates fired together from two app windows came back as `OPS-6,
-OPS-6, OPS-7…`, both calls reported success, and the first `OPS-6` was silently
-overwritten. `allocateKey` reads `.counters.json`, increments it and writes it
-back, and nothing guards that sequence across processes. `VaultService`'s queue
-only serializes within one.
-
-The lock closed the easy way to reach this, but not the only one. The app, the
-MCP server and the CLI are still three processes over one vault. The narrowest
-fix is in the core: have the item write refuse to replace a key file that
-already exists (`wx`, the exclusive-create flag) and retry allocation on
-`EEXIST`. Losing the race then costs a retry instead of an item. A lockfile
-around the whole allocation also works, but on Windows it brings stale-lock
-recovery with it.
-
 ## The command palette finds things but cannot do anything
 
 `CommandPalette.tsx` searches two kinds of row, projects and items, and opening
