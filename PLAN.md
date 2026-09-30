@@ -4,10 +4,10 @@ Stack is decided: **Electron**. This started as the plan for the desktop shell
 and has become the log of what was built and why each call was made.
 
 **Phases 0 through 4 are complete**, plus the run of smaller features recorded
-below them. The suite is at 204 green tests — 111 in the core, 49 over the app
-(ordering, selection, navigation, links, history formatting) and 44 over the
-scripts in `scripts/`. The counts in this paragraph have drifted before; CI now
-runs the suite on every push, so a stale number here is a documentation lapse
+below them. The suite is at 252 green tests as of 2026-09-29 — 127 in the core,
+81 over the app (ordering, selection, navigation, links, history formatting,
+theme and colour tokens) and 44 over the scripts in `scripts/`. The counts in
+this paragraph have drifted before; CI now runs the suite on every push, so a stale number here is a documentation lapse
 rather than an untested claim.
 **Phase 5, the Jira push UI, is the only phase left**, and it carries
 `vault jira discover` with it.
@@ -1476,6 +1476,19 @@ action. `vault jira discover` was the other half of this phase and has been
 built ahead of it — see its section below — because it had stopped being a
 missing feature and become a warning that named a command the CLI would reject.
 What remains here is the push itself, which is the part that writes.
+
+One requirement for the pane, raised in the September review: show a **per-field
+diff**, not a list of items. For a new issue that means the payload as Jira will
+receive it, after `buildDescription` has added its footer. For a drifted item it
+means local against the last-pushed baseline. The diff is what makes an explicit
+POST an informed choice rather than a confirmation dialog, and it is the view the
+missing "update a drifted issue" path (IDEAS.md) needs anyway. Build the diff
+once and both of them get it.
+
+The bulk-create CSV (PR #53) and `vault jira record` now give a no-API route into
+Jira. That changes how urgent this phase is, not whether it is wanted: the CSV
+round trip is right for a first import, and the pane is right for the trickle of
+edits after it.
 
 ## `reporter` — who asked for it, surfaced in the app ✅ built and driven
 
