@@ -27,6 +27,7 @@ import { rangeBetween } from "./selection";
 import { THEME_DESCRIPTIONS, THEME_LABELS, nextTheme } from "./theme";
 import { BOARD_ORDER, STATUS_LABELS, isClosed, knownPeople, knownReporters, todayIso } from "./pieces";
 import { BulkBar } from "./BulkBar";
+import { isLater } from "./later";
 
 type View = "backlog" | "board" | "agenda" | "calendar" | "history";
 
@@ -69,6 +70,19 @@ export function App(): React.JSX.Element {
    */
   const [types, setTypes] = useState<ReadonlySet<ItemType>>(() => new Set());
   const [openOnly, setOpenOnly] = useState(true);
+  /**
+   * "Hide later": drop work that is open but not for today — a future start
+   * date, or a recurring item already ticked this period. See `isLater`.
+   *
+   * Off by default, unlike Hide closed. Closed work is finished, so hiding it
+   * loses nothing; later work is real work, and a card that disappears the
+   * moment its start date is typed in would read as the edit having deleted it.
+   *
+   * Backlog and board only. The calendar is where future-start work is *meant*
+   * to be seen, so the control is absent there rather than present and
+   * quietly inverting that view's purpose.
+   */
+  const [hideLater, setHideLater] = useState(false);
   /**
    * Whether the board splits into one band per project.
    *
@@ -315,6 +329,8 @@ export function App(): React.JSX.Element {
   const filtered = useMemo<Item[]>(() => {
     if (!snapshot) return [];
     const needle = text.trim().toLowerCase();
+    const today = todayIso();
+    const dropLater = hideLater && (view === "backlog" || view === "board");
     return visibleItems.filter((item) => {
       if (project && item.project !== project) return false;
       if (status !== "all" && item.status !== status) return false;
@@ -322,13 +338,14 @@ export function App(): React.JSX.Element {
       if (cadence !== "all" && item.cadence !== cadence) return false;
       if (reporter !== "all" && item.reporter?.trim().toLowerCase() !== reporter) return false;
       if (openOnly && isClosed(item.status)) return false;
+      if (dropLater && isLater(item, today)) return false;
       if (needle) {
         const haystack = `${item.key} ${item.summary} ${item.description} ${item.category ?? ""} ${item.labels.join(" ")} ${item.reporter ?? ""} ${item.assignee ?? ""}`;
         if (!haystack.toLowerCase().includes(needle)) return false;
       }
       return true;
     });
-  }, [snapshot, visibleItems, project, status, types, cadence, reporter, openOnly, text]);
+  }, [snapshot, visibleItems, project, status, types, cadence, reporter, openOnly, hideLater, view, text]);
 
   /**
    * Every key the vault still holds — not `visibleItems`.
@@ -1170,6 +1187,20 @@ export function App(): React.JSX.Element {
                 />
                 Hide closed
               </label>
+              {view !== "calendar" && (
+                <label
+                  className="status-line"
+                  style={{ cursor: "pointer" }}
+                  title="Hides work not meant for today — a to-do whose start date is still ahead, and recurring work already ticked for this period. Both come back on their own."
+                >
+                  <input
+                    type="checkbox"
+                    checked={hideLater}
+                    onChange={(e) => setHideLater(e.target.checked)}
+                  />
+                  Hide later
+                </label>
+              )}
               {/*
                 Board-only, so it is absent on the backlog rather than present
                 and inert. A checkbox and not a .chip: .chip capitalizes its

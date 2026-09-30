@@ -3267,3 +3267,68 @@ whether the handler ran or not. Run against the pre-fix build, the spec fails
 with the second copy still running at 15 seconds. Each harness run gets its own
 temporary user-data directory, so the lock is per run and parallel e2e runs do
 not refuse each other.
+
+## The pile can hide work that is not for today ✅ built and driven
+
+Promoted out of IDEAS.md's "Scheduled as a seventh status", which asked for a
+new status and was answered with two filters instead. The complaint was real: a
+daily item ticked an hour ago held its slot in the `todo` column exactly like one
+nobody had touched all week, and a task meant to begin in November looked, in
+every view, like work actionable this morning. `startDate` was stored, edited
+and pushed to Jira, and filtered nothing anywhere.
+
+**Why not a status.** The question that decided it, and will decide the next one
+like it: *does the item leave the state on its own, or does a person decide it
+leaves?* A start date arriving and a recurrence period turning are both the
+clock. A stored status for either goes stale the morning it comes true, and the
+only fixes are a sweep on load — the app rewriting `status` on files it merely
+opened, which lands in history as an edit nobody made — or nothing. Derived
+filters have neither problem. The one case a status could still fit, "I have
+decided not to look at this yet" with no date, stays in IDEAS.md as `parked`,
+to be priced once the filters have been lived with.
+
+**One control, not two.** IDEAS.md described two filters, and the core has them
+separately. The toolbar folds them into a single "Hide later" beside Hide closed,
+because to the person looking at the pile they answer the same question — is
+this for today? — and the toolbar was already seven controls wide. `isLater` in
+`later.ts` holds the reading as a pure function, tested in `later.test.ts`.
+
+**Only `todo` is deferred by a future start.** An item in progress, in review or
+blocked has begun, whatever its start date says. Moving into `in_progress`
+stamps `startDate` with today anyway, so a future start on a started item is a
+hand edit, and hiding the item it was typed on would hide the evidence.
+
+**`isTickedFor`, not `isSettledForWindow`.** IDEAS.md named `isSettledForWindow`
+as the helper a filter would want. That is right for the agenda, which asks
+whether anything more is owed before a *window* closes. The backlog and board
+have no window; they ask about today. A window ending today makes the two
+functions agree, since every period containing today ends on or after it, and
+`isTickedFor` says what is meant without a window argument that is always
+`today`.
+
+**Off by default, unlike Hide closed.** Closed work is finished, so hiding it
+loses nothing. Later work is real work, and a card vanishing the moment someone
+types a start date would read as the edit having deleted it. This is the one
+place a default of "off" is doing the job a confirmation would otherwise do.
+
+**Backlog and board only.** The calendar is where future-start work is meant to
+be seen, so the checkbox is absent there rather than present and quietly
+inverting that view's purpose. The agenda already drops settled items on its
+own terms and has its own toolbar branch.
+
+**The core gets `startBefore` and `startAfter`**, mirroring `dueBefore` and
+`dueAfter` exactly — inclusive, and an undated item never matches — and
+`vault_list_items` exposes both, so an outside Claude can ask what is not meant
+to start yet. The app does not use them: its filtering runs over the snapshot in
+the renderer, as every other toolbar filter does, and "undated counts as
+actionable" is a different predicate from a date range anyway.
+
+257 tests green (128 core, 85 app, 44 scripts), typecheck clean. Driven in the
+real app by `e2e/hide-later.e2e.mts`, five ordered checks: off by default with
+both kinds of later item listed, ticking it hides a future-start todo and a daily
+ticked today while keeping a plain one, the board honours it, the calendar has no
+such control, and unticking brings both back. Not verified: the filter's
+reading at midnight. `today` is computed when `filtered` recomputes, not on a
+timer, so a window left open overnight keeps yesterday's reading until the next
+edit or filter change. That is true of every date the app shows, and not new
+here.

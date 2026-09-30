@@ -220,6 +220,7 @@ Args:
   - category, label, assignee, parent (string, optional)
   - reporter (string, optional): who asked for the work — also spoken as "requested by". Matched case-insensitively, so "john doe" finds "John Doe".
   - dueBefore / dueAfter (YYYY-MM-DD, optional)
+  - startBefore / startAfter (YYYY-MM-DD, optional): by startDate, the day work is meant to begin. "startAfter: <tomorrow>" finds work that is not meant to begin yet. Items with no startDate never match either one.
   - open (boolean, optional): true excludes closed items — both 'done' and 'disregard'
   - text (string, optional): case-insensitive match on summary, description, category, labels, and reporter
   - limit (number, 1-500, default 100), offset (number, default 0)
@@ -240,6 +241,8 @@ Don't use when: you want today's or this week's priorities — vault_get_agenda 
       parent: itemKey.optional(),
       dueBefore: z.string().optional(),
       dueAfter: z.string().optional(),
+      startBefore: z.string().optional(),
+      startAfter: z.string().optional(),
       open: z.boolean().optional(),
       text: z.string().optional(),
       limit: z.number().int().min(1).max(500).default(100),

@@ -334,6 +334,14 @@ export const ItemFilter = z
     parent: itemKey.optional(),
     dueBefore: isoDate.optional(),
     dueAfter: isoDate.optional(),
+    startBefore: isoDate
+      .optional()
+      .describe(
+        "Items whose startDate is on or before this date. Like dueBefore, an item with no startDate never matches — ask for undated work by leaving this out, not by expecting it here.",
+      ),
+    startAfter: isoDate
+      .optional()
+      .describe("Items whose startDate is on or after this date. An item with no startDate never matches."),
     open: z.boolean().optional().describe("true = exclude done items"),
     text: z
       .string()
