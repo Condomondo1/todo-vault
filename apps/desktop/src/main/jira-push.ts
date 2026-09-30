@@ -42,12 +42,12 @@ import {
 
 import type {
   JiraAskField,
-  JiraChoice,
   JiraDraftView,
   JiraPushOutcome,
   JiraPushPreview,
   JiraPushProgress,
 } from "../shared/api.js";
+import { choicesFor } from "../shared/jira-choices.js";
 import { parseStoredCredential } from "./jira-credential.js";
 import { getSecret } from "./secrets.js";
 import type { VaultService } from "./vault-service.js";
@@ -216,16 +216,6 @@ function adfText(node: unknown): string {
 function fieldName(meta: ProjectMeta, issueType: string, fieldId: string): string {
   const type = issueTypeNamed(meta, issueType);
   return (type && fieldOn(type, fieldId)?.name) ?? fieldId;
-}
-
-function choicesFor(allowed: unknown[] | undefined): JiraChoice[] {
-  return (allowed ?? []).flatMap((entry) => {
-    if (!entry || typeof entry !== "object") return [];
-    const e = entry as { id?: unknown; name?: unknown; value?: unknown };
-    if (typeof e.id !== "string") return [];
-    const label = typeof e.name === "string" ? e.name : typeof e.value === "string" ? e.value : e.id;
-    return [{ value: { id: e.id }, label }];
-  });
 }
 
 function askFieldsFor(ctx: PushContext, askValues: Record<string, unknown>): JiraAskField[] {

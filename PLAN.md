@@ -4210,3 +4210,108 @@ stays on the list for the manual check after slice B.
 selected option into its accessible name, so the Epic select is named "Epic
 Epic". An exact `getByLabel` then never matches, and the spec finds selects by
 their caption instead.
+
+## Jira, part B2b-2: extra fields and people are set in the app ✅ built and driven
+
+B2b-1 let the app choose the project, the issue types and the vault's own
+fields. It could also name a gap, "Story requires Team, which nothing fills
+in", and give no way to close it short of editing `jira-map.yaml` by hand.
+B2b-2 adds the two sections that close such gaps. **Extra fields** are the
+Jira fields the vault has no equivalent for. **People** are the Jira accounts
+behind the vault's assignees. Both sit in the Mapping tab and are saved by the
+same Save, which finishes slice B.
+
+**One value editor, drawn in two places.** The push pane already had an editor
+for an `ask` field's value, chosen by `valueKindFor`: a select over Jira's own
+options, checkboxes for multi-selects, a date or number input, and raw JSON
+for sprint, Team and app fields. It moved out of `JiraPush.tsx` into
+`JiraValueField.tsx`, and `choicesFor` moved from main to
+`shared/jira-choices.ts`, so an extra field's stored value and a push's
+one-off value are drawn and shaped the same way. A value chosen in Settings
+is then recognised as selected in the pane, rather than being an equal-looking
+object that fails a `JSON.stringify` comparison. The push e2e runs unchanged
+through the moved editor.
+
+**A new extra field is limited to the types that have it.** Adding Team in ENG
+writes `issueTypes: [Epic, Story, Task]`, because ENG's Subtask screen has no
+Team field. Jira answers a field sent off-screen with a 400, so an unlimited
+field would be a push failure waiting for the first subtask. The limit is left
+off only when every chosen type has the field. A gap line gets a **Fill it
+in** button that adds the field this way, or extends an existing entry's
+types to the one the gap is on. Once filled, the line says "Added above; save
+to check it", because gaps are still the saved map's.
+
+**Only fields nothing else fills are offered.** The add list skips fields the
+push fills from each item: summary, description, labels, components,
+assignee, due date, parent and priority. It also skips `reporter`, which the
+push never sends because it is the field most likely to name someone with no
+account, and the fields already chosen for the vault's own. Required fields
+come first. The skip list mirrors the item-dependent half of the core's
+`fieldsTheMapCanFill`. The renderer cannot import that from `todo-vault`,
+which loads `fs`, so the list is written out in `JiraMappingExtras.tsx` with
+a comment naming its source.
+
+**People are linked on one match and no fewer.** Each assignee in the vault,
+one spelling each through `knownPeople`, is searched with the assignable
+search for the project (`jira:search-people`, via the core's
+`searchAssignable`). The general user search was not used: an account Jira
+would refuse as an assignee in this project is not worth mapping. A search
+that returns exactly one person links it. More than one offers a choice, and
+none says so. That is the same evidence floor `vault-capture` keeps. "Find
+everyone" runs the searches one after another, and each link is merged
+through React's functional setter, so a later answer never drops an earlier
+one. Two spellings of one person are refused at Save, because the push folds
+case and would otherwise have to pick between them.
+
+**When the panel sends a set, it owns the set.** A choice carrying
+`extraFields` or `people` replaces the map's, and an entry it no longer names
+is removed. A choice without them, such as a B2b-1-shaped save, leaves them
+alone. The panel sends them only once it has read the saved map, because
+before that they are empty for want of reading, not because someone removed
+everything. A removal is an edit to a key the choice no longer names, so main
+needs the file as it is. `VaultService.saveJiraMap` now takes a function of
+the current map and reads the file *inside* the queued write. Read outside the
+queue, a removal could be worked out against a file another write was about
+to change.
+
+**Entry by entry, except into an empty block.** Existing entries are edited
+one at a time, so comments between them survive, as in B2b-1. An empty block
+is the one exception. The example file writes `extraFields: {}` and
+`people: {}`, and entries added into a flow map stay flow, which would put a
+whole Team entry on one line. So a block with no entries is set whole, which
+`yaml` writes in block style. The example's commented-out sample entry,
+written just below it, survives either way. The unit test checks exactly that
+text.
+
+Not done, each deliberately:
+- **`defaults` is not converted to `extraFields`.** The plan had the panel
+  offer this. `defaults` still loads and still counts as filled for the gaps,
+  so nothing is broken by leaving it, and a conversion is its own reviewable
+  change.
+- **A user-typed extra field is raw JSON, not a people search.** The
+  assignable search answers "who can be assigned here", which is the wrong
+  question for, say, a reviewer field.
+- **Linked accounts are not re-checked.** A deactivated account shows as
+  linked until Jira refuses it at push time.
+
+Verified in `test/jira-mapping.test.ts`, 19 tests with 6 new. They cover:
+- a choice without the sets leaves them alone
+- the sets replace entry by entry, with removals
+- nothing empty is written (null value, blank name, empty type list)
+- a bad field id, a mode that is neither `always` nor `ask`, two spellings of
+  one person, or a person with no account is refused
+- a first Save into the example file writes both blocks in block style and
+  keeps the commented sample
+- `mapState` hands both back
+
+`e2e/jira-mapping.e2e.mts` grew to 11 steps against the fake ENG:
+- **Fill it in** adds Team on Epic, Story and Task, and Payments is chosen from
+  Jira's options.
+- Dan is linked from his only match, through an authorized assignable search.
+- Save writes both exactly, the gap disappears, and the commit is made.
+- Removing Team and saving again removes it from the file, brings the gap
+  back, and leaves Dan linked.
+
+`jira-push`, `jira-push-pane` and `jira-settings` still pass. Not verified: a
+real Jira Cloud site, where the assignable search's results and Team's schema
+may differ from the fake's. That check is next, now that slice B is done.

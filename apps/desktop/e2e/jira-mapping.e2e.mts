@@ -13,10 +13,10 @@ import { promises as fs } from "node:fs";
 import { promisify } from "node:util";
 import { after, before, describe, test } from "node:test";
 
-import { jiraMapPath, loadJiraMap } from "todo-vault";
+import { Vault, jiraMapPath, loadJiraMap } from "todo-vault";
 
 import { canStartFakeJira, startFakeJira, type FakeJira } from "./fake-jira.mjs";
-import { START_DATE_FIELD, serveProject } from "./fake-jira-project.mjs";
+import { DAN, START_DATE_FIELD, TEAM_FIELD, serveProject } from "./fake-jira-project.mjs";
 import { launchHarness, type Harness } from "./harness.mjs";
 
 const EMAIL = "me@acme.com";
@@ -48,6 +48,12 @@ describe(
       serveProject(jira);
       harness = await launchHarness({ env: { NODE_EXTRA_CA_CERTS: jira.caCertPath } });
       await harness.page.locator("table.table tbody tr").first().waitFor({ state: "visible" });
+
+      // Someone assigned, for the People section to offer. Written behind the
+      // app's back, as a synced edit would be, and waited for on screen.
+      const vault = await Vault.open(harness.vaultRoot);
+      await vault.createItem({ project: "ACME", type: "task", summary: "Reconcile the ledger", assignee: "Dan Okafor" });
+      await harness.page.getByText("Reconcile the ledger").first().waitFor();
     });
 
     after(async () => {
@@ -143,6 +149,62 @@ describe(
       await mapping().getByRole("button", { name: "Load project" }).click();
       assert.equal(await select("Bug").inputValue(), "Task", "the saved choice is kept");
       await mapping().getByText("Story requires Team, which nothing fills in.").waitFor();
+    });
+
+    const team = () => mapping().locator(`.jira-extra[data-field-id="${TEAM_FIELD}"]`);
+    const dan = () => mapping().locator('.jira-person[data-person="Dan Okafor"]');
+
+    test("Fill it in adds Team as an extra field, only on the types that have it", async () => {
+      await mapping().locator(".jira-blockers li", { hasText: "Story requires Team" }).getByRole("button", { name: "Fill it in" }).click();
+      await team().waitFor();
+      // ENG's Subtask has no Team, so sending it there would be a 400.
+      await team().getByText("On Epic, Story, Task").waitFor();
+      assert.equal(await team().getByLabel("When to send Team").inputValue(), "always");
+      assert.deepEqual(await team().locator("select").first().locator("option").allInnerTexts(), [
+        "— none —",
+        "Platform",
+        "Payments",
+      ]);
+      await team().locator("select").first().selectOption({ label: "Payments" });
+      await mapping().getByText("Added above; save to check it.").waitFor();
+    });
+
+    test("an assignee with exactly one match in Jira is linked on its own", async () => {
+      await dan().getByText("Not linked").waitFor();
+      await dan().getByRole("button", { name: "Find in Jira" }).click();
+      await dan().getByText(`→ ${DAN.displayName}`).waitFor();
+      assert.ok(
+        jira.requests.some((r) => r.method === "GET" && r.path.startsWith("/rest/api/3/user/assignable/search") && r.authorized),
+        "found through the assignable search, with the stored credential",
+      );
+    });
+
+    test("Save writes both, and the gap they closed is gone", async () => {
+      await mapping().getByRole("button", { name: "Save mapping" }).click();
+      await mapping().getByText("Saved to jira-map.yaml.").waitFor();
+      await mapping().locator(".jira-gaps").waitFor({ state: "detached" });
+
+      const map = await loadJiraMap(jiraMapPath(harness.vaultRoot));
+      assert.deepEqual(map.extraFields[TEAM_FIELD], {
+        name: "Team",
+        mode: "always",
+        value: { id: "t2" },
+        issueTypes: ["Epic", "Story", "Task"],
+      });
+      assert.deepEqual(map.people["Dan Okafor"], { accountId: DAN.accountId, displayName: DAN.displayName });
+      assert.equal(await git("log", "-1", "--format=%s"), "Update Jira mapping");
+      assert.equal(await git("status", "--porcelain"), "");
+    });
+
+    test("removing the field on the next Save removes it from the file, and the gap returns", async () => {
+      await team().getByRole("button", { name: "Remove" }).click();
+      await team().waitFor({ state: "detached" });
+      await mapping().getByRole("button", { name: "Save mapping" }).click();
+      await mapping().getByText("Story requires Team, which nothing fills in.").waitFor();
+
+      const map = await loadJiraMap(jiraMapPath(harness.vaultRoot));
+      assert.equal(TEAM_FIELD in map.extraFields, false);
+      assert.equal(map.people["Dan Okafor"]?.accountId, DAN.accountId, "the person is untouched");
     });
   },
 );

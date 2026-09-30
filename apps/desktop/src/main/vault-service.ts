@@ -5,6 +5,7 @@ import { EventEmitter } from "node:events";
 import chokidar, { type FSWatcher } from "chokidar";
 import {
   jiraMapPath,
+  loadJiraMap,
   syncedRootFor,
   Vault,
   writeJiraMap,
@@ -328,10 +329,20 @@ export class VaultService extends EventEmitter {
    * the vault like any other, and the commit is a `git add -A`. Unqueued, it
    * could race an item write's own commit for `index.lock`, or be swept into
    * that commit under the item's message.
+   *
+   * The edits are built from the map as it is inside the queue, because a
+   * Save removes the extra fields and people it no longer names. Read outside
+   * the queue, a removal could be worked out against a file another write was
+   * about to change. Null means there is no map yet.
    */
-  saveJiraMap(edits: readonly JiraMapEdit[]): Promise<JiraMap> {
+  saveJiraMap(editsFor: (current: JiraMap | null) => readonly JiraMapEdit[]): Promise<JiraMap> {
     return this.write(async (v) => {
-      const map = await writeJiraMap(jiraMapPath(v.root), edits);
+      const file = jiraMapPath(v.root);
+      const current = await fs.access(file).then(
+        () => loadJiraMap(file),
+        () => null,
+      );
+      const map = await writeJiraMap(file, editsFor(current));
       await v.commitChange("Update Jira mapping");
       return map;
     });

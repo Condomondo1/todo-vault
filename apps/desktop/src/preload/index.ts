@@ -55,6 +55,7 @@ const api: VaultApi = {
   jiraLoadMap: () => ipcRenderer.invoke(CHANNELS.jiraLoadMap),
   jiraLoadMeta: (projectKey) => ipcRenderer.invoke(CHANNELS.jiraLoadMeta, projectKey),
   jiraSaveMap: (choice) => ipcRenderer.invoke(CHANNELS.jiraSaveMap, choice),
+  jiraSearchPeople: (projectKey, query) => ipcRenderer.invoke(CHANNELS.jiraSearchPeople, projectKey, query),
   clearJiraCredentials: () => ipcRenderer.invoke(CHANNELS.clearJiraCredentials),
   jiraPreviewPush: (keys, askValues) => ipcRenderer.invoke(CHANNELS.jiraPreviewPush, keys, askValues),
   jiraPush: (keys, askValues) => ipcRenderer.invoke(CHANNELS.jiraPush, keys, askValues),

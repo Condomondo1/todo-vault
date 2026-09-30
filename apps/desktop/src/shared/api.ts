@@ -147,8 +147,9 @@ export interface JiraStatus {
 }
 
 // --------------------------------------------------------- Jira mapping
-// Settings -> Jira's second half: which Jira project, and which of its issue
-// types and fields the vault's own go to. Extra fields and people are separate.
+// Settings -> Jira -> Mapping: which Jira project, which of its issue types
+// and fields the vault's own go to, the Jira fields the vault has no
+// equivalent for, and which Jira account each vault person is.
 
 /** The vault's item types, each of which goes to one Jira issue type. */
 export type VaultIssueType = "epic" | "story" | "task" | "bug" | "subtask";
@@ -171,6 +172,39 @@ export interface JiraMappingChoice {
     /** "labels" to fold the category into labels, or a text field's id. */
     category: string;
   };
+  /**
+   * The whole set of extra fields, by field id. Present means the panel owns
+   * the set: an id missing from it is removed from the map. Absent leaves the
+   * map's extra fields exactly as they were.
+   */
+  extraFields?: Record<string, JiraExtraField>;
+  /** The whole set of people, by the vault's spelling. Same rule as `extraFields`. */
+  people?: Record<string, JiraPersonLink>;
+}
+
+/** A Jira field the vault has no equivalent for, and what to send in it. */
+export interface JiraExtraField {
+  /** Jira's name for it, kept for whoever reads the file. */
+  name?: string;
+  /** `always` sends `value` on every issue; `ask` offers it, prefilled, on each push. */
+  mode: "always" | "ask";
+  /** Already in the shape Jira's create API takes. */
+  value?: unknown;
+  /** Only these issue types, by name. Absent means every type. */
+  issueTypes?: string[];
+}
+
+/** A vault person's Jira account. */
+export interface JiraPersonLink {
+  accountId: string;
+  displayName?: string;
+}
+
+/** Someone Jira says can be assigned in the project. */
+export interface JiraPerson {
+  accountId: string;
+  displayName: string;
+  emailAddress?: string;
 }
 
 /** The mapping as `jira-map.yaml` has it now, or `exists: false` before the first save. */
@@ -182,6 +216,8 @@ export type JiraMapState =
       baseUrl?: string;
       issueTypes: Record<VaultIssueType, string>;
       fields: { startDate?: string; estimate?: string; category: string };
+      extraFields: Record<string, JiraExtraField>;
+      people: Record<string, JiraPersonLink>;
       /**
        * Required fields on a mapped issue type that nothing under this map can
        * fill in. Absent until this project's metadata has been loaded in this
@@ -502,6 +538,8 @@ export interface VaultApi {
   jiraLoadMeta(projectKey: string): Promise<Result<ProjectMeta>>;
   /** Write the mapping into `jira-map.yaml`, comments kept, and commit it. */
   jiraSaveMap(choice: JiraMappingChoice): Promise<Result<JiraMapState>>;
+  /** People Jira will accept as an assignee in this project, matching `query`. */
+  jiraSearchPeople(projectKey: string, query: string): Promise<Result<JiraPerson[]>>;
   clearJiraCredentials(): Promise<Result<JiraStatus>>;
 
   /**
@@ -606,6 +644,7 @@ export const CHANNELS = {
   jiraLoadMap: "jira:load-map",
   jiraLoadMeta: "jira:load-meta",
   jiraSaveMap: "jira:save-map",
+  jiraSearchPeople: "jira:search-people",
   clearJiraCredentials: "jira:clear-credentials",
   jiraPreviewPush: "jira:preview-push",
   jiraPush: "jira:push",
