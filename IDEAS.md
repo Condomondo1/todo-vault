@@ -8,6 +8,20 @@ for the shape of one of those).
 Newest at the top. No status tracking here — once something's picked up, its
 entry moves out to wherever it's being built.
 
+## The ✕ should ask before it throws away an unsent comment
+
+A click beside the open item no longer closes it while a comment is typed and
+unposted. It stays, and a notice by the comment box says *post it or clear it,
+or close with ✕*. That leaves the ✕ as the one route that still discards the
+text without a word, and it is the route the notice itself points to. The ✕ is
+a deliberate close, which is why it was left alone when outside clicks were
+built. But it loses the same text the outside-click guard protects.
+
+The small version is a confirm on ✕ when `comment.trim()` is non-empty. The
+panel already knows this: it is what `onOutstandingChange` reports to App.
+Escape's last rung, closing the panel, would want the same check, or the two
+ways out of the panel would disagree.
+
 ## The command palette finds things but cannot do anything
 
 `CommandPalette.tsx` searches two kinds of row, projects and items, and opening

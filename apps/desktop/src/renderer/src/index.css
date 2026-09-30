@@ -2111,6 +2111,18 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   min-height: 56px;
 }
 
+/* Why a click beside the panel did nothing. Tinted like .modal-error but in
+   the priority amber, because nothing failed. The click was held back on
+   purpose. */
+.comment-unsent {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--high) 16%, var(--bg-inset));
+  color: var(--text);
+}
+
 .btn-danger {
   border-color: var(--border-strong);
   color: var(--text-dim);

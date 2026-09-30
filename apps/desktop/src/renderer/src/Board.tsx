@@ -502,6 +502,7 @@ function DraggableCard({
       {...attributes}
       {...listeners}
       className={isDragging ? "card-placeholder" : undefined}
+      data-item-key={item.key}
       onClick={() => onSelect(item.key)}
     >
       <Card item={item} selected={selected} />

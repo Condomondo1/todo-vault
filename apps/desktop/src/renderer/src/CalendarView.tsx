@@ -186,6 +186,7 @@ function Chip({
       aria-selected={selected}
       style={{ borderLeftColor: `var(--${item.priority})` }}
       title={`${item.key} — ${item.summary}`}
+      data-item-key={item.key}
       onClick={() => onSelect(item.key)}
     >
       {item.summary}

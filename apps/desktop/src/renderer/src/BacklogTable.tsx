@@ -78,6 +78,7 @@ export function BacklogTable({
           <tr
             key={item.key}
             aria-selected={item.key === selected}
+            data-item-key={item.key}
             onClick={() => onSelect(item.key)}
           >
             <td className="cell-check">
