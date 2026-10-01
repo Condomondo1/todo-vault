@@ -2,57 +2,60 @@
 
 A local, Jira-shaped task tracker that lives in plain markdown files.
 
-Every task is a markdown file with YAML frontmatter. That one decision is what
-lets a desktop app, a command line, and any Claude — inside the app or outside
-it — all read and write the same data with no server, no database, and no sync
-protocol. Your tasks stay files you own, greppable and diffable, and git gives
-you history and undo for free.
+Every task is a markdown file with YAML frontmatter. That one decision lets a
+desktop app, a command line, and any Claude (inside the app or outside it) read
+and write the same data with no server, no database and no sync protocol. Your
+tasks stay files you own, greppable and diffable, and git gives you history and
+undo.
 
-It is shaped like Jira on purpose — epics, stories, tasks, bugs, subtasks, a
-real status workflow, priorities, labels, links — so work can be pushed *up* to
-Jira when it needs to be shared. The vault is always upstream; it is never a
+It is shaped like Jira on purpose: epics, stories, tasks, bugs, subtasks, a real
+status workflow, priorities, labels and links. That way work can be pushed *up*
+to Jira when it needs to be shared. The vault is always upstream, never a
 mirror.
 
 > **Status:** the vault core, CLI, MCP server and desktop app are built and in
-> daily use. The desktop app pushes to Jira from a review pane (Settings → Jira
-> connects it); it has not yet been run against a real Jira project. The CLI
-> and MCP server plan a push but never send one.
-> See [`PLAN.md`](PLAN.md) for what was built and why, and
-> [`IDEAS.md`](IDEAS.md) for what is being considered next.
+> daily use. The desktop app creates and updates Jira issues from a review pane
+> and has been used against a production Jira Cloud site. The CLI and MCP server
+> plan a push but never send one. See [`PLAN.md`](PLAN.md) for what was built and
+> why, and [`IDEAS.md`](IDEAS.md) for what is being considered next.
 
 ---
 
 ## What you get
 
-**A desktop app.** Five views over one vault, on keys `1`–`5`: a backlog table
-with nested subtasks, a drag-and-drop board that stops drawing the columns your
-filters have emptied, an agenda over six time scopes, a month calendar you
-reschedule in by dragging a chip to another day, and a History view reading the
-git log back in vault terms (`dueDate 2026-08-06 → 2026-08-19`, not a patch).
-Behind all five, a detail panel where every edit commits straight to the file —
-there is no save button and no draft state. Illegal
-status moves are prevented rather than attempted and reported. Descriptions are
-rich-text edited but stored as plain markdown. Recurring work is ticked off for
-the current period rather than closed permanently. Light, dark or follow the OS,
-chosen in the app rather than inherited from it. Press `?` for every keyboard
-shortcut.
+**A desktop app.** It has five views over one vault, on keys `1`–`5`:
+- a backlog table with nested subtasks
+- a drag-and-drop board
+- an agenda over six time scopes
+- a month calendar, where you reschedule by dragging a chip to another day
+- a History view that reads the git log back as field changes
+  (`dueDate 2026-08-06 → 2026-08-19`)
+
+Behind all five is a detail panel where every edit commits straight to the
+file. There is no save button, and a click beside the panel closes it, unless a
+comment is still unsent. Illegal status moves are prevented, not attempted.
+Descriptions are edited as rich text and stored as plain markdown. Recurring
+work is ticked off for the current period rather than closed. Press `?` for
+every keyboard shortcut, and `Ctrl+K` to search everything.
 
 **A command line.** Everything the app does, plus diagnostics and exports.
-Scriptable, and the fastest way to add a task without breaking flow.
 
-**An MCP server.** Point Claude Desktop or Claude Code at the vault and ask it
-in plain language: *"what's due this week"*, *"add a task to chase the vendor
-SOW, due Friday, under the migration epic"*. Twenty-seven tools, with schema
-validation and hierarchy rules enforced on the way in.
+**An MCP server.** Point Claude Desktop or Claude Code at the vault and ask in
+plain language: *"what's due this week"*, *"add a task to chase the vendor SOW,
+due Friday, under the migration epic"*. It has twenty-seven tools, and every
+write is checked against the schema and the hierarchy rules.
 
-**Optional AI drafting inside the app.** Add an Anthropic API key and the create
-dialog takes a sentence and fills the form out for you to review before anything
-is written.
+**Push to Jira from the app.** Connect one Jira Cloud project once. Choose items
+and review exactly what will be sent. Then create the issues, or update the
+ones that changed since their last push, field by field. See
+[Pushing to Jira](#pushing-to-jira).
 
-**Git-backed history.** Pass `--git` and every write is auto-committed, which
-gives you an audit trail and an undo that does not depend on the app being
-running. Deletes go to `.trash/` regardless, so recovery never depends on git
-being set up at all.
+**Optional AI drafting.** Add an Anthropic API key, and the create dialog turns
+a sentence into a filled-in form for you to review before anything is written.
+
+**History and undo through git.** The app commits every write. If the vault is
+not a git repository yet, a banner offers **Turn on history**. Deletes go to
+`.trash/` regardless, so recovery never depends on git.
 
 ---
 
@@ -60,16 +63,14 @@ being set up at all.
 
 | | |
 |---|---|
-| **Node.js 22+** | Developed against 24; CI runs both. `node --version` to check. |
-| **npm** | Ships with Node. The repo is an npm workspace. |
-| **Git** *(recommended)* | Not required to run, but without it the vault keeps no history. |
-| **~350 MB disk** | Electron's runtime, downloaded on first build and cached per-machine. |
-| **An Anthropic API key** *(optional)* | Only for in-app AI drafting. Everything else works without one. |
+| **Node.js 22+** | Developed against 24; CI runs both. |
+| **Git** *(recommended)* | Without it the vault keeps no history. |
+| **~350 MB disk** | Electron's runtime, downloaded on first build and cached. |
+| **An Anthropic API key** *(optional)* | Only for in-app AI drafting. |
+| **A Jira Cloud API token** *(optional)* | Only for pushing to Jira. |
 
-Windows, macOS and Linux are all supported by the toolchain; the app is
-developed and used on Windows.
-
-New machine, step by step? See [`GETTING-STARTED.md`](GETTING-STARTED.md).
+The app is developed and used on Windows. The toolchain also runs on macOS and
+Linux. New machine? See [`GETTING-STARTED.md`](GETTING-STARTED.md).
 
 ---
 
@@ -79,25 +80,24 @@ New machine, step by step? See [`GETTING-STARTED.md`](GETTING-STARTED.md).
 irm https://raw.githubusercontent.com/rellik92j/todo-vault/main/scripts/bootstrap.ps1 | iex
 ```
 
-Installs Node and Git via `winget` if either is missing, clones the repo, runs
-`npm install`, and opens the menu — all in one run, in the terminal you already
-have open. This fetches and runs a script from this repo over the network — read
-[`scripts/bootstrap.ps1`](scripts/bootstrap.ps1) first if that's a concern; it is
-mostly comments explaining itself.
+It does four things:
+- installs Node and Git with `winget` if either is missing
+- clones the repo
+- runs `npm install`
+- opens the menu
 
-It asks one question, and only on a machine that needs it. Windows ships
-PowerShell set to refuse scripts, and `npm` is one — typing it runs `npm.ps1`,
-so every `npm` command on this page fails with a security error that names a
-file you've never heard of. The script offers to switch **your account** (not
-the machine) to `RemoteSigned`, which is the standard fix and needs no
-administrator rights. Decline and it still finishes; only your own `npm`
-commands afterwards stay blocked.
+This runs a script from this repo over the network, so read
+[`scripts/bootstrap.ps1`](scripts/bootstrap.ps1) first if that concerns you.
 
-Already have Node and Git? The quick start below skips straight to a clone.
+It may ask one question. Windows ships PowerShell set to refuse scripts, and
+`npm` is one, so every `npm` command fails with a security error. The script
+offers to set **your account** (not the machine) to `RemoteSigned`. That needs
+no administrator rights. Decline and it still finishes, but your own `npm`
+commands stay blocked.
 
 ---
 
-## Quick start - set up a test vault with pre-loaded examples. 
+## Quick start, with an example vault
 
 ```bash
 git clone https://github.com/rellik92j/todo-vault.git
@@ -108,27 +108,28 @@ npm run seed -- ./vault
 npm run dev
 ```
 
-That builds the core, creates a worked example vault, and launches the app
-against it.
+The example vault has three projects and fifteen items:
+- an epic with stories, tasks, a subtask and a bug
+- daily, weekly and monthly recurring items
+- every link type
+- a hidden project
+- one item already pushed to Jira
 
-The example vault is three projects and fifteen items — an epic with stories,
-tasks, a subtask and a bug, recurring daily/weekly/monthly items, every link
-type, both ways an item can close, a hidden project, and one item already pushed
-to Jira. It is also the fixture the UI is developed against. Rebuild it any time
-with `npm run seed -- ./vault --force`, which clears the contents but leaves
-`.git` alone, so history survives a reset.
+Rebuild it any time with `npm run seed -- ./vault --force`. That clears the
+contents but leaves `.git` alone.
 
 ---
 
-## Running it: the menu **Main way to begin**
+## Running it
+
+### The menu
 
 ```bash
 npm run menu
 ```
 
-A numbered launcher for everything below. Pick an option with a **single
-keypress** — no Enter, no remembering script names — and it returns to the menu
-when the command finishes.
+A numbered launcher for everything. Pick an option with a **single keypress**.
+It returns to the menu when the command finishes.
 
 ```
   todo-vault — workspace commands
@@ -157,124 +158,69 @@ when the command finishes.
    [C] Connect Claude…                  prints the MCP config, paths filled in
 
    [0] Exit
-
-  ──────────────────────────────────────────────────────────
-  Choose an option (single keypress, Ctrl+C to quit):
 ```
 
-Almost every option runs one npm script. Where a command is really a sequence it
-is the script that encodes it, not the menu: **Prod preview** has to build the
-core *before* launching, or you get a freshly built desktop bundle wrapped around
-whatever `packages/core/dist` happened to contain last time — an app that looks
-clean and carries a stale core. `npm run preview` holds that order for everyone,
-including whoever never opens the menu.
+Three options ask for input:
+- **[8]** passes your arguments to the CLI, with quotes honoured.
+- **[S]** asks you to type `FORCE` before it overwrites an existing vault.
+- **[C]** prints the MCP config for this machine. It never edits your Claude
+  config file for you.
 
-Three options take input rather than running straight away. **[8] Vault CLI**
-prompts for arguments and hands them to the CLI, quotes honoured, so
-`new --project ENG --summary "Two words"` arrives intact. **[S] Seed** asks for a
-target directory and requires you to type `FORCE` before it will overwrite an
-existing vault, since that is not a recoverable action. **[C] Connect Claude**
-asks which vault to point at and prints the config block below, and is the one
-entry that runs no npm script at all — it composes text and displays it. It
-never edits `claude_desktop_config.json`, because that file holds other servers,
-credentials and preferences, and merging into it would reformat all of them to
-add four lines.
-
-`Ctrl+C` inside a running command — the dev server, the MCP server — stops that
-command and returns you to the menu rather than killing both.
+`Ctrl+C` inside a running command stops that command and returns to the menu.
 
 ### Or run the scripts directly
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Builds the core, launches the app with hot reload. Day-to-day editing. |
-| `npm run build` | Builds both workspaces. |
+| `npm run dev` | Builds the core and launches the app with hot reload. |
 | `npm run preview` | Builds the core, then the production preview. Closest to what ships. |
-| `npm run preview:skip-build` | The same preview without rebuilding. Only correct if nothing changed. |
-| `npm test` | Runs both workspaces' tests plus the launcher's own. |
-| `npm run e2e` | Builds both workspaces, then drives the built app end to end against a throwaway vault. Slow; not part of `npm test` or CI. |
+| `npm run preview:skip-build` | The same preview without rebuilding. |
+| `npm run build` | Builds both workspaces. |
+| `npm test` | Runs the unit tests in both workspaces and the scripts. |
+| `npm run e2e` | Builds, then drives the real app against a throwaway vault. Slow. |
 | `npm run typecheck` | Both workspaces, plus `scripts/`. |
-| `npm run vault -- <args>` | The vault CLI, from the repo root. |
+| `npm run vault -- <args>` | The vault CLI. |
 | `npm run mcp` | The MCP server, over stdio. |
-| `npm run seed -- <dir>` | Build the worked example vault. |
-| `npm run update` | Pull, reinstall, rebuild core — refuses rather than merging if you have diverged. |
+| `npm run seed -- <dir>` | Builds the example vault. |
+| `npm run update` | Pulls, reinstalls and rebuilds the core. Refuses rather than merging if you have diverged. |
 | `npm run shortcut` | Writes a desktop shortcut that starts the built app with no terminal. |
-| `npm run check-updates` | Is the build stale, or is there a newer version upstream? |
-| `npm run menu` | The launcher above. |
+| `npm run check-updates` | Says whether the build is stale or a newer version is upstream. |
 
-### Starting it without a terminal
-
-Every command above leaves a console window open for as long as the app runs,
-because each of them puts a process above Electron that has to stay alive —
-`npm run preview` is npm waiting on electron-vite waiting on Electron, and
-closing the terminal takes all three down. Fine while developing, tiresome on a
-machine you only use the app on.
+### Starting it without a terminal (Windows)
 
 ```bash
 npm run shortcut
 ```
 
-Writes `todo-vault.lnk` to your desktop — the same thing as the menu's **[D]**.
-It runs `scripts/launch.vbs` under `wscript.exe`, which is Windows' script host
-in its windowless form: the same language `cscript.exe` runs with a console,
-hosted by a binary that never allocates one. So it starts Electron and exits,
-leaving the app running with no parent process and nothing to close.
+This writes `todo-vault.lnk` to your desktop, the same as the menu's **[D]**. A
+double-click starts the app with no console window. Opening it a second time
+brings the running window forward instead of opening another.
 
-Two things follow from how it works, both deliberate:
+**The shortcut launches what is built, and does not build.** If nothing is built,
+it says so in a dialog.
 
-- **It launches what is built, and does not build.** A build behind a
-  double-click would be about ten seconds of nothing visible, with no console to
-  show progress in, and it would put the build-then-launch order in a second
-  place when `npm run preview` already owns it. If nothing is built yet, the
-  launcher says so in a dialog rather than failing silently — and if something
-  *is* built but out of date, it says that too, which is what the next section
-  is about.
-- **Nothing stops you opening it twice.** The app has no single-instance lock,
-  so a second double-click is a second window over the same vault. Logged in
-  `IDEAS.md`; it belongs in the main process, not in the launcher.
+**It checks whether you are behind.** Just after the window appears, it checks
+two things in the background:
+- whether the build is older than the source
+- whether the remote has newer commits
 
-#### It tells you when you are behind
+If either is true, a dialog offers to update. **Yes** opens a terminal to do it,
+and **No** does nothing. With no git, no network or no remote, it stays silent.
 
-Because the shortcut never builds, it would otherwise be the one way of starting
-the app that can quietly run a version you replaced weeks ago. So a moment after
-the window appears, `npm run check-updates` runs hidden and asks two questions:
-
-| | |
-|---|---|
-| **Is the build stale?** | Newest source timestamp against oldest build output. Instant, no network, and the only thing that catches `npm run update` having rebuilt the core alone. |
-| **Is there a newer version?** | `git fetch`, then how many commits upstream has that you do not. |
-
-If either is true you get a dialog naming exactly what will run, and **Yes**
-opens a visible terminal to run it — the one moment in this design where a
-console is what you want, since a build is worth watching and a failure needs
-reading. **No** closes it and nothing happens.
-
-The order is the point: the app has already started before any of this begins.
-A check in front of the launch would spend a `git fetch` of silence on every
-single start, including the overwhelming majority with nothing to report.
-
-Everything about it fails soft. No git, no network, no remote, no Node on
-`PATH`, a folder copied out of its clone — each of those ends in silence and a
-running app, never in a dialog nagging about something it could not actually
-determine. Run `npm run check-updates` yourself to see the same answer in
-prose.
-
-Run it again if you move the repo — it rewrites the existing shortcut rather
-than making another one. Windows only; this is a `.lnk`. It is not packaging:
-the shortcut still needs the clone, the install and the build on that machine,
-which is the problem `PACKAGING.md` is about.
+Run it again if you move the repo. The shortcut still needs the clone and the
+build on that machine; [`PACKAGING.md`](PACKAGING.md) covers moving a copy.
 
 ---
 
 ## The CLI
 
-The CLI runs from the repo root, so relative paths mean what they look like:
+Run it from the repo root:
 
 ```bash
 npm run vault -- agenda week --vault ./vault
 ```
 
-The everyday ones:
+The everyday commands:
 
 ```
 new --project KEY --summary "..."   Create an item
@@ -291,59 +237,35 @@ delete KEY [--cascade]              Move to .trash, recoverable
 doctor                              Validate every file, find dangling links
 ```
 
-Plus `init`, `disregard`, `attach`, `move`, `trash`/`restore`, `git-status`, a
-`project` group (create, rename, reorder, hide, move items between, delete) and
-`jira plan`/`jira csv`. **Run `npm run vault` with no arguments for the complete
-list**, including every field flag for `new` and `set`.
+There is more: `init`, `disregard`, `attach`, `move`, `trash` and `restore`,
+`git-status`, a `project` group (create, rename, reorder, hide, move items,
+delete), and the `jira` commands below. **Run `npm run vault` with no arguments
+for the complete list**, including every field flag.
 
-### Global options
-
-| Flag | |
+| Global flag | |
 |---|---|
 | `--vault <dir>` | Vault location. Defaults to `$VAULT_DIR`, then `./vault`. |
-| `--git` | Auto-commit every write. The desktop app always passes this. |
-| `--json` | Machine-readable output, for scripting. |
+| `--git` | Auto-commit every write. The desktop app always does this. |
+| `--json` | Machine-readable output. |
 
-Set `VAULT_DIR` in your environment to stop passing `--vault` everywhere.
+**Agenda scopes:** `today` (the default), `week`, `nextWeek`, `twoWeeks`,
+`month` and `next30Days`. Weeks run Monday to Sunday. The longer scopes split
+their output into bands, nearest first.
 
-### Agenda scopes
-
-`agenda` takes six, defaulting to `today`. Weeks run Monday to Sunday.
-
-| Scope | |
-|---|---|
-| `today` `week` `nextWeek` | The calendar periods around now |
-| `twoWeeks` | This week and next, as one fourteen-day window |
-| `month` | The calendar month |
-| `next30Days` | Thirty days rolling forward from today |
-
-The last one matters on the 28th, when `month` has three days left in it. The
-three long scopes subdivide their output — nearest first, two or three headings
-whatever day it is — rather than printing one flat list. The app draws the same
-bands.
-
-The app's calendar is the one place a week starts on Sunday instead. It is a
-grid, following the convention every other month grid follows, and it has no
-second consumer to agree with — an agenda band states its week as a `from`/`to`
-range in prose, and a weekly cadence's period is never drawn as columns, so
-both stay Monday-anchored without either constraining the other.
-
-**A few other flags worth knowing.** `list --sort rank` gives the manual order;
-the default `--sort work` sorts by urgency (overdue, then due date, then
-priority). `link` takes six kinds: `--url`, `--item`, `--file`, `--folder`,
-`--outlook`, `--note`. `attach --no-copy` points at a file in place rather than
-copying it in, which is what you want for anything living in OneDrive or
-SharePoint.
+**Flags worth knowing:**
+- `list --sort rank` gives the manual order. The default sorts by urgency.
+- `link` takes `--url`, `--item`, `--file`, `--folder`, `--outlook` and
+  `--note`.
+- `attach --no-copy` links a file in place instead of copying it. Use it for
+  anything in OneDrive or SharePoint.
 
 ---
 
 ## Wiring up Claude
 
-The MCP server exposes the vault over stdio. `npm run menu` → **[C]** prints the
-config below with this machine's paths already filled in, which is the way to do
-this — the two placeholders are exactly the kind of thing that goes wrong
-silently. Add it to Claude Desktop's `claude_desktop_config.json`, or to your
-Claude Code MCP settings:
+The MCP server exposes the vault over stdio. Run `npm run menu` → **[C]** to
+print this config with your machine's paths filled in. Add it to Claude
+Desktop's `claude_desktop_config.json`, or to your Claude Code MCP settings:
 
 ```json
 {
@@ -360,70 +282,105 @@ Claude Code MCP settings:
 }
 ```
 
-That path is the *built* server, so `npm run build` has to have run. Point it at
-a file that is not there and nothing announces it: Claude reports no error and
-the vault tools simply never appear.
+**The path is the built server, so run `npm run build` first.** A wrong path
+fails silently: Claude reports no error, and the tools never appear.
 
-**Cowork needs nothing extra.** It has no MCP config of its own — it reads the
-same `claude_desktop_config.json` and bridges local stdio servers into its VM
-through Desktop, so the one entry covers both. Desktop has to be quit fully and
-reopened for either to see it; the file is read at startup only, and closing to
-the tray is not quitting.
+**Cowork needs nothing extra.** It reads the same config through Claude Desktop.
+Quit Desktop fully and reopen it after editing the file. Closing it to the tray
+is not quitting.
 
-Then, from any Claude session: *"what's due this week"*, *"add a task to chase
-the vendor SOW, due Friday, under the migration epic"*, *"mark ACME-12 done and
-note that legal signed off"*.
+The twenty-seven tools cover:
+- **Reading:** filtered lists, a full item with children and backlinks, the
+  agenda, and the project list.
+- **Writing:** create, update, move through the workflow, tick recurring work,
+  reorder, comment, link and attach.
+- **Projects:** create, rename (which re-keys every item), reorder, hide, and
+  move an item with its subtree.
+- **Recovery:** delete to `.trash/`, list what can be restored, and restore it.
+- **Jira:** plan a push, and record one that was made.
 
-Twenty-seven tools are registered, covering:
+Destructive tools refuse rather than guess. For example, deleting an item with
+children returns the list of what is in the way.
 
-- **Reading** — filtered lists, a full record with children and backlinks, the
-  agenda, and the project portfolio.
-- **Writing** — create, update, transition through the workflow, tick recurring
-  work, reorder, comment, link, and attach.
-- **Projects** — create, update, rename (re-keying every item), reorder, hide,
-  unhide, and move an item and its subtree across.
-- **Recovery** — delete to `.trash/`, restore, and list what is recoverable.
-- **Jira** — build a reviewable push payload, and record a completed push.
-
-Destructive tools are marked `destructiveHint` and refuse rather than guess:
-deleting something with children returns an error listing what is in the way
-instead of taking it along.
-
-Because the vault is plain markdown, a Claude with only filesystem access can
-already read and edit it. The MCP server adds schema validation, key allocation
-and hierarchy rules on top — worth having, but not a hard dependency.
-
-The CLI and MCP surfaces cover the same ground on items and projects. A handful
-of operations are one-sided — `doctor`, `git-status`, `history`, `jira csv` and
-`jira record` are CLI-only (`history` is also a desktop view);
-`vault_mark_pushed` is MCP-only; bulk edit is desktop-only.
+Some operations exist on only one surface:
+- `doctor`, `git-status`, `jira csv` and `jira record` are CLI-only.
+- `history` is in the CLI and the app.
+- Bulk edit and sending to Jira are app-only.
 
 ---
 
 ## Pushing to Jira
 
-Push only. The vault is upstream of Jira, never a mirror of it.
+The vault is upstream of Jira. Nothing is ever pulled back into an item. **Only
+the desktop app sends anything to Jira**, and only after you have reviewed it.
 
-```bash
-cp jira-map.example.yaml vault/jira-map.yaml
-# fill in your instance's custom field ids — `jira discover` below finds them
-npm run vault -- jira plan --vault ./vault --out plan.json
-```
+### From the app
 
-`plan.json` contains ordered issue drafts with descriptions already converted to
-Atlassian Document Format. Parents are sequenced before their children, and
-items already pushed and unchanged are skipped. Review it, POST it, then record
-the push so drift detection has a baseline.
+**1. Connect.** Press **Jira** in the toolbar.
+- Enter your site, your email and an API token from
+  [id.atlassian.com](https://id.atlassian.com/manage-profile/security/api-tokens).
+  Classic and scoped tokens both work.
+- The app checks the token with Jira before it stores anything.
+- The token is encrypted with the operating system's credential store. It is
+  never written to the vault and never shown again.
 
-**The POST is deliberately left to you**, so an offline vault stays offline
-until you decide otherwise. Nothing here writes to Jira — the only command that
-touches the network at all is `jira discover`, and it only reads.
+**2. Map.** On the **Mapping** tab:
+- Load your project and choose a Jira issue type for each vault type.
+- Pick the fields for start date, estimate and category.
+- The app offers only what that project's screens actually have.
+- Save writes `jira-map.yaml` into the vault and commits it. The file's
+  explanatory comments are kept.
 
-### Bulk create by CSV, with no API token
+**3. Fill the gaps.** The Mapping tab names any field Jira requires that nothing
+fills, such as *"Story requires Team"*. **Fill it in** adds it as an
+**extra field**. Each extra field is set one of two ways:
+- **Send on every issue**, with a fixed value.
+- **Ask on each push**, prefilled, so you can change it for one batch.
 
-`jira csv` writes a file for Jira Cloud's external import — the path to take
-when there is no token, or the site is behind a VPN you would rather not
-automate against.
+Values are typed as you would say them, and the app builds the JSON Jira needs:
+
+| Field kind | You enter |
+|---|---|
+| Paragraph text | Plain text, with `**bold**`, `- lists` and `[links](…)` |
+| Select, multi-select, version, component | A choice from Jira's own list |
+| Two-level select | Two dropdowns |
+| Person | Someone you've linked, or a search of the site |
+| Labels and lists | A comma-separated list |
+| Date, number, sprint id, team id | That value |
+
+A value Jira would refuse shows its problem under the field. Fields Jira sets
+itself, such as Rank, are never offered. An older map with a `defaults` block
+offers **Convert** to turn those entries into extra fields.
+
+**4. Link people.** In the **People** section, **Find everyone in Jira**
+searches for each assignee in your vault. A single match links automatically,
+and anything else waits for you to choose. Anyone left unlinked is created
+unassigned, and the push says so.
+
+**5. Push.** Check items in the backlog and choose **Push to Jira…** from the
+bulk bar. You can also use `Ctrl+K`, or an unpushed item's Jira row. The pane
+shows:
+- **Each issue to create**, field by field, with **Show JSON** for the exact
+  request.
+- **Changed since pushed**, for items edited after their last push. Each row
+  shows Jira's current value next to the vault's.
+  - Untick a field to keep Jira's value.
+  - Untick every field to leave the item for a later push.
+  - If Jira already matches, **Mark as in sync** clears the changed state with
+    nothing sent.
+- **Anything that would fail**, with the reason, before anything is sent.
+
+The button says what it will do, e.g. **Create 2 and update 1 in ENG**.
+- Parents are created before children.
+- Each issue is recorded in the vault the moment Jira confirms it.
+- A connection that drops mid-push is remembered. The next push asks whether
+  that issue reached Jira before it can be sent again, so nothing is created
+  twice.
+
+### Without the app: CSV import
+
+`jira csv` writes a file for Jira Cloud's external import. Use it when there is
+no API token or the site is hard to reach.
 
 ```bash
 npm run vault -- jira csv --vault ./vault --out issues.csv
@@ -431,63 +388,26 @@ npm run vault -- jira csv --vault ./vault --out issues.csv
 npm run vault -- jira record --vault ./vault --from jira-export.csv
 ```
 
-It exports open items by default; add `--all` to include closed ones, and
-`--reporter` to add a Reporter column. Reporter is off by default because the
-vault stores people as free text and the importer resolves them against real
-accounts — the command prints the names in the file so you can check them
-before importing rather than after a half-failed load.
+It exports open items by default. Add `--all` to include closed ones, or
+`--reporter` to add a Reporter column. On the import screen:
+- **Map `Issue Id` and `Parent id`.** Skip them and every item arrives
+  unparented, with no error.
+- **`Labels` and `Components` repeat**, one column per value. The command prints
+  the column list.
+- **The import is a site-admin screen.** Without the permission it is missing
+  from the menu.
 
-Three things about the import screen are worth knowing in advance, because each
-fails quietly rather than loudly:
+Afterwards, run **`jira record`** on a CSV exported back out of Jira, with the
+local keys and the new issue keys. That stops the next export creating
+everything again. `--dry` reports without writing.
 
-- **Map `Issue Id` and `Parent id`.** They are how rows inside one import link
-  to each other. Skip them and the import still succeeds — with every epic and
-  story arriving unparented.
-- **`Labels` and `Components` repeat.** One column per value is how the
-  importer reads a multi-value field. The command prints the full column list
-  after writing the file.
-- **External import needs permission.** It is a site-admin screen; without the
-  permission it is missing from the menu rather than reporting an error.
+### Planning from the CLI or Claude
 
-Then **run `jira record`** on a CSV exported back out of Jira, containing the
-local keys and the issue keys Jira created. That is what stops the next export
-offering to create everything a second time. It reads the two columns by name,
-skips any local key it cannot find, and refuses to overwrite an item already
-recorded under a different Jira key. `--dry` reports without writing.
-
-### Finding your instance's field ids
-
-The part that always bites: **every Jira instance names its fields
-differently.** Start date is a custom field with a different id on every site,
-and estimate is genuinely two different fields — `Story point estimate` on
-team-managed projects, `Story Points` on company-managed ones — which is why a
-hardcoded `customfield_10016` is wrong about half the time.
-
-```bash
-export JIRA_EMAIL=you@company.com
-export JIRA_TOKEN=...        # an API token from id.atlassian.com
-npm run vault -- jira discover --url https://yoursite.atlassian.net --project ENG --vault ./vault
-```
-
-It reads that one project's create metadata (its issue types, and the fields
-each one's create screen offers), so a field that exists elsewhere on your site
-but not on this project is never proposed. It then prints a YAML fragment to paste into `jira-map.yaml`, annotated with the name
-each id had on your instance so you can check the guess rather than trust a
-number. It does not write the file — `jira-map.yaml` is nine tenths comments
-explaining what each value is for, and merging into it would mean reserialising
-all of them.
-
-Two things it does deliberately. Where two fields share a display name — which
-Jira permits, and which is how estimates end up written to a field nobody reads
-— it reports both rather than picking one. And where an issue type has been
-renamed, it says so instead of guessing, because a site calling Story
-"Deliverable" cannot be inferred.
-
-Credentials come from the environment rather than flags, so the token stays out
-of your shell history and the process list.
-
-If `fields.startDate` is missing from your map, the plan warns rather than
-silently dropping your dates.
+`jira plan` (and the MCP tool `vault_plan_jira_push`) writes the create payloads
+the app would send, as JSON, without sending them. `jira discover` reads one
+project's fields and prints a `jira-map.yaml` fragment. It needs `JIRA_EMAIL`
+and `JIRA_TOKEN` in the environment. The app's Mapping tab does the same job
+with less typing.
 
 ---
 
@@ -497,83 +417,27 @@ An npm workspace with two packages:
 
 | | |
 |---|---|
-| `packages/core` | The vault: schema, read/write, CLI, MCP server, Jira planner |
+| `packages/core` | The vault: schema, read/write, CLI, MCP server, Jira planner and client |
 | `apps/desktop` | The Electron app over it |
 
-The core has no idea the app exists. The app holds no state the vault does not.
-
-Inside the core, `schema.ts` is the source of truth — a zod schema every write
-is validated against. `Vault` imports `node:fs`, so it lives in Electron's main
-process and the renderer reaches it only through a `contextBridge` preload, with
-`contextIsolation` on and `nodeIntegration` off. The app watches `items/` and
-`projects/`, so an edit from the CLI, an external Claude, or Notepad shows up in
-about a second without a refresh.
-
-Read [`SCHEMA.md`](SCHEMA.md) before changing anything in
-`packages/core/src/schema.ts`.
+The core has no idea the app exists, and the app holds no state the vault does
+not. `schema.ts` is the source of truth: every write is validated against it.
+Read [`SCHEMA.md`](SCHEMA.md) before changing it. The app watches the vault, so
+an edit from the CLI, an external Claude or a text editor shows up within about
+a second.
 
 ### Tests
 
-```bash
-npm test
-```
+- `npm test` runs the fast unit suites: the core, the app's pure logic and the
+  workspace scripts.
+- `npm run e2e` drives the built app against a throwaway vault, and against a
+  local fake Jira for the push. It is slow, opens real windows, and stays out of
+  CI.
 
-Covers the core (key allocation, disk round-trips, frontmatter stability,
-hierarchy and transition rules, recurrence periods, agenda sectioning, the
-description grammar in both directions, ADF conversion, push ordering, drift
-detection, trash and restore, atomic writes, bulk edit, Jira field discovery),
-the desktop app's pure renderer logic (nesting, collapse, type filtering, board
-lanes and which of them a filter leaves reachable, agenda bands, the calendar's
-month grid, multi-select ranges, the theme cycle), and the workspace scripts —
-the menu's argument tokenizer and the config block it prints, the staleness
-verdict and the exit codes `launch.vbs` switches on, the shortcut's quoting, and
-which dirty lockfiles `update` is entitled to throw away.
-
-One of those tests reads `index.css` rather than any TypeScript: every colour
-token in the dark `:root` has to appear in the light one too, and clear a
-contrast floor against both grounds. That was prose until a token got added to
-one half of the palette and nothing failed — not a test, not a typecheck, not a
-review — which is the whole argument for it being a test now.
-
-```bash
-npm run e2e
-```
-
-Drives the *built* app itself, over `playwright-core`'s `_electron`, against a
-throwaway seeded vault and an isolated `--user-data-dir` — never the real
-`vault/` at the repo root. It reaches two kinds of thing `npm test` cannot.
-
-First the `.tsx` files — `ItemDetail.tsx`, `RichEditor.tsx`, `Markdown.tsx` —
-which the fast suite deliberately excludes so that `tsx --test` importing JSX
-does not drag React into it. That is the comment editor: old comments rendering
-as markdown, the save hint being absent, blur and Ctrl+Enter not posting,
-posting for real, and a quoted comment's border reading clear of the comment's
-own.
-
-Second, the facts that live in no TypeScript file at all. That the calendar's
-seven columns stay seven *equal* columns when a wide chip lands in one of them,
-which is a CSS grid rule rather than a function. That the board really stops
-drawing a column its filters have emptied, and that a card in the ones left can
-still be closed. And that Electron's `nativeTheme.themeSource` genuinely moves
-`prefers-color-scheme` in the renderer, survives a relaunch, and agrees with the
-colour Chromium paints before the first frame — none of which a pure test can
-see, since the cycle it *can* see is the part of that feature least likely to
-break.
-
-Screenshots land in `apps/desktop/e2e/artifacts/` (gitignored) for the one part
-no DOM assertion can prove — see `PLAN.md`'s "Driving the desktop app with
-Playwright" section for the whole argument. It is slow, launches a real Electron
-window, and stays out of both `npm test` and CI on purpose.
-
-[CI](.github/workflows/ci.yml) runs all of it on every pull request and every
-push to `main` — `npm ci`, a core build, typecheck and the suite, on Node 22 and
-24, plus a separate job for the full build. Windows only, deliberately: this
-codebase routes around the `npm.cmd` shim and retries renames for transient
-Windows file locks, and neither path is reachable on Linux, so a green Linux run
-would be evidence about a program nobody runs.
-
-`main` is not a protected branch, so a red run is still something a human can
-merge past. See [`IDEAS.md`](IDEAS.md).
+[CI](.github/workflows/ci.yml) runs a core build, the typecheck and the unit
+tests on Node 22 and 24, plus a full build. It runs on Windows only, because
+that's the only platform the app is used on. `main` is protected: all three
+checks must pass before a pull request merges.
 
 ---
 
