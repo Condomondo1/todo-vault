@@ -2903,6 +2903,42 @@ kbd.pill {
   align-items: center;
 }
 
+/* An update's differing fields: Jira now, then the vault, one row each. */
+.jira-changes {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.jira-changes th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+  padding: 2px 6px;
+}
+
+.jira-changes td {
+  padding: 4px 6px;
+  border-top: 1px solid var(--border);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.jira-changes td:first-child,
+.jira-changes td:nth-child(4) {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.jira-change-locked td {
+  color: var(--text-faint);
+}
+
+.jira-state-updated {
+  color: var(--done);
+}
+
 /* Value editors that are more than one control: a cascading select's two
    levels side by side, and a people picker's chosen chips over its adders. */
 .jira-cascading,

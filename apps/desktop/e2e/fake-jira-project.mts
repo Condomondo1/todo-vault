@@ -129,11 +129,14 @@ export const FIELDS: Record<string, Field[]> = {
 export interface ServedProject {
   /** Every issue Jira created, in order, with the fields it was sent. */
   created: Array<{ key: string; id: string; fields: Record<string, unknown> }>;
+  /** Every update Jira accepted, in order, with exactly the fields the PUT carried. */
+  updated: Array<{ key: string; fields: Record<string, unknown> }>;
 }
 
 /** Add ENG's routes to a running fake Jira. */
 export function serveProject(jira: FakeJira): ServedProject {
   const created: ServedProject["created"] = [];
+  const updated: ServedProject["updated"] = [];
   const base = `/rest/api/3/issue/createmeta/${PROJECT.key}/issuetypes`;
 
   jira.route("GET", `/rest/api/3/project/${PROJECT.key}`, () => ({ body: PROJECT }));
@@ -157,15 +160,7 @@ export function serveProject(jira: FakeJira): ServedProject {
     if (project?.key !== PROJECT.key) errors.project = "valid project is required";
     if (!type?.id || !FIELDS[type.id]) errors.issuetype = "valid issue type is required";
     if (type?.id === ISSUE_TYPES.story.id && !fields[TEAM_FIELD]) errors[TEAM_FIELD] = "Team is required.";
-    const doc = fields[PROPOSAL_FIELD] as { type?: string; version?: number } | undefined;
-    if (doc !== undefined && (doc?.type !== "doc" || doc.version !== 1)) {
-      errors[PROPOSAL_FIELD] = "Operation value must be an Atlassian Document (see the Atlassian Document Format).";
-    }
-    const where = fields[REGION_FIELD] as { id?: string; child?: { id?: string } } | undefined;
-    if (where !== undefined && !REGIONS.some((r) => r.id === where?.id && (!where.child || r.children.some((c) => c.id === where.child?.id)))) {
-      errors[REGION_FIELD] = "Specify a valid value for Region";
-    }
-    if (RANK_FIELD in fields) errors[RANK_FIELD] = "Field 'Rank' cannot be set. It is not on the appropriate screen, or unknown.";
+    Object.assign(errors, valueErrors(fields));
     for (const key of Object.keys(fields)) {
       if (type?.id && FIELDS[type.id] && key !== "parent" && !FIELDS[type.id].some((x) => x.fieldId === key)) {
         errors[key] = `Field '${key}' cannot be set. It is not on the appropriate screen, or unknown.`;
@@ -176,8 +171,78 @@ export function serveProject(jira: FakeJira): ServedProject {
     const n = created.length + 1;
     const issue = { key: `${PROJECT.key}-${n}`, id: String(20000 + n), fields };
     created.push(issue);
+    serveIssue(issue, type!.id!);
     return { status: 201, body: { id: issue.id, key: issue.key, self: `https://localhost/rest/api/3/issue/${issue.id}` } };
   });
 
-  return { created };
+  /**
+   * An issue once it exists: read, its edit screen, and edited. The edit
+   * screen is the create screen less what Jira fixes at create (project,
+   * issue type, reporter). A PUT is checked like a create, so an update that
+   * sends a field off that screen, non-ADF rich text or a Rank is refused, and
+   * applied like Jira applies it: `null` clears.
+   */
+  const serveIssue = (issue: ServedProject["created"][number], typeId: string): void => {
+    const path = `/rest/api/3/issue/${issue.key}`;
+    const type = Object.values(ISSUE_TYPES).find((t) => t.id === typeId)!;
+    const editScreen = FIELDS[typeId].filter((f) => !["project", "issuetype", "reporter"].includes(f.fieldId));
+    jira.route("GET", path, () => ({
+      body: { id: issue.id, key: issue.key, fields: { ...issue.fields, issuetype: { id: type.id, name: type.name } } },
+    }));
+    jira.route("GET", `${path}/editmeta`, () => ({
+      body: {
+        fields: Object.fromEntries(
+          editScreen.map((f) => [
+            f.fieldId,
+            {
+              name: f.name,
+              required: f.required,
+              schema: f.schema,
+              operations: f.operations,
+              ...(f.allowedValues ? { allowedValues: f.allowedValues } : {}),
+            },
+          ]),
+        ),
+      },
+    }));
+    jira.route("PUT", path, (req: FakeJiraRequest) => {
+      const { fields } = JSON.parse(req.body) as { fields: Record<string, unknown> };
+      const errors = valueErrors(fields);
+      for (const key of Object.keys(fields)) {
+        if (!editScreen.some((f) => f.fieldId === key)) {
+          errors[key] = `Field '${key}' cannot be set. It is not on the appropriate screen, or unknown.`;
+        }
+      }
+      if (Object.keys(errors).length) return { status: 400, body: { errorMessages: [], errors } };
+      for (const [key, value] of Object.entries(fields)) {
+        if (value === null) delete issue.fields[key];
+        else issue.fields[key] = value;
+      }
+      updated.push({ key: issue.key, fields });
+      return { status: 204, body: undefined };
+    });
+  };
+
+  return { created, updated };
+}
+
+/** Value checks a create and an update share: rich text as ADF, a real cascade, and never a Rank. */
+function valueErrors(fields: Record<string, unknown>): Record<string, string> {
+  const errors: Record<string, string> = {};
+  for (const id of [PROPOSAL_FIELD, "description"]) {
+    const doc = fields[id] as { type?: string; version?: number } | null | undefined;
+    if (doc !== undefined && doc !== null && (doc.type !== "doc" || doc.version !== 1)) {
+      errors[id] = "Operation value must be an Atlassian Document (see the Atlassian Document Format).";
+    }
+  }
+  const where = fields[REGION_FIELD] as { id?: string; child?: { id?: string } } | null | undefined;
+  if (
+    where !== undefined &&
+    where !== null &&
+    !REGIONS.some((r) => r.id === where.id && (!where.child || r.children.some((c) => c.id === where.child?.id)))
+  ) {
+    errors[REGION_FIELD] = "Specify a valid value for Region";
+  }
+  if (RANK_FIELD in fields) errors[RANK_FIELD] = "Field 'Rank' cannot be set. It is not on the appropriate screen, or unknown.";
+  return errors;
 }

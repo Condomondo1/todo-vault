@@ -94,7 +94,7 @@ test("a full ISO date-time from an older map shows in a datetime-local input as 
 });
 
 test("Jira's field errors are named as Jira shows the field, in the message too", async () => {
-  const { namedFieldErrors } = await import("../src/main/jira-names.js");
+  const { fieldName, namedFieldErrors } = await import("../src/main/jira-names.js");
   const meta = {
     site: "https://acme.atlassian.net",
     projectKey: "ENG",
@@ -125,11 +125,16 @@ test("Jira's field errors are named as Jira shows the field, in the message too"
     fieldErrors: { customfield_10001: "Team is required.", customfield_99: "Unknown." },
     uncertain: false,
   };
-  const named = namedFieldErrors(failure, meta, "story");
+  const named = namedFieldErrors(failure, (id) => fieldName(meta, "story", id));
   assert.deepEqual(named.fieldErrors, { Team: "Team is required.", customfield_99: "Unknown." });
   assert.equal(named.message, "Jira refused it. Team: Team is required. customfield_99: Unknown.");
   assert.equal(named.localKey, "ACME-2");
-  assert.equal(namedFieldErrors(failure, meta, undefined), failure, "no issue type, nothing to name it by");
+  assert.equal(namedFieldErrors(failure, undefined), failure, "nothing to name them by");
+  // An update names them from the edit screen, which can differ from the create screen.
+  assert.deepEqual(namedFieldErrors(failure, (id) => ({ customfield_99: "Sprint" })[id] ?? id).fieldErrors, {
+    customfield_10001: "Team is required.",
+    Sprint: "Unknown.",
+  });
 });
 
 test("a hand-written name resolves through People, and an unknown one stays text rather than a fake account", () => {

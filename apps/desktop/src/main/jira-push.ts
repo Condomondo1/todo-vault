@@ -20,18 +20,27 @@ import { app } from "electron";
 import {
   adfToMarkdown,
   buildPushPlan,
+  buildUpdatePlan,
   createJiraClient,
+  diffIssue,
   distinctFields,
   fetchProjectMeta,
+  issueUrl,
+  JiraError,
   jiraMapPath,
   loadJiraMap,
   pushTargetProblem,
+  readIssueState,
   resolveCloudId,
   sendPushPlan,
+  sendUpdates,
   uncertainAttemptSearchUrl,
   valueKindFor,
+  type IssueDiff,
+  type IssueState,
   type Item,
   type JiraClient,
+  type JiraIssueUpdate,
   type JiraMap,
   type JiraPushPlan,
   type ProjectMeta,
@@ -45,6 +54,8 @@ import type {
   JiraPushOutcome,
   JiraPushPreview,
   JiraPushProgress,
+  JiraUpdateChoice,
+  JiraUpdateView,
 } from "../shared/api.js";
 import { choicesFor } from "../shared/jira-choices.js";
 import { fieldName, namedFieldErrors } from "./jira-names.js";
@@ -172,8 +183,8 @@ async function loadContext(
  * before someone checks is how a duplicate gets made.
  *
  * `holdDrifted` for the same reason: an item changed since it was pushed is
- * listed as "update not supported yet", where the CSV export would create it
- * again. The app has no update yet, and a second issue is worse than none.
+ * never drafted as a new issue, which the CSV export would do. It is skipped
+ * here, and `readUpdates` offers it as an update to the issue it already has.
  */
 async function planFor(
   service: VaultService,
@@ -196,6 +207,71 @@ async function planFor(
     }
     return { plan, items };
   });
+}
+
+// ---------------------------------------------------------------- updates
+
+/** A changed item, its Jira issue as it is now, and where the two differ. */
+interface ReadUpdate {
+  update: JiraIssueUpdate;
+  state: IssueState;
+  diff: IssueDiff;
+  summary: string;
+}
+
+/**
+ * The items among `keys` changed since their push, each read from Jira now and
+ * diffed. Read fresh every time, never cached: the point is to compare with
+ * what Jira holds at this moment, and someone may have edited it a minute ago.
+ *
+ * An issue that cannot be read is a problem for that item only. A 404 means it
+ * was deleted or moved in Jira, and the item is not updated.
+ */
+async function readUpdates(
+  service: VaultService,
+  ctx: PushContext,
+  keys: string[],
+): Promise<{ read: ReadUpdate[]; problems: Array<{ localKey: string; message: string }>; warnings: string[] }> {
+  const { updates, warnings, summaries } = await service.read((vault) => {
+    const items = keys.map((key) => vault.getItem(key));
+    return { ...buildUpdatePlan(items, ctx.map, vault), summaries: new Map(items.map((i) => [i.key, i.summary])) };
+  });
+  const read: ReadUpdate[] = [];
+  const problems: Array<{ localKey: string; message: string }> = [];
+  for (const update of updates) {
+    let state: IssueState;
+    try {
+      state = await readIssueState(ctx.client, update);
+    } catch (err) {
+      const message =
+        err instanceof JiraError && err.kind === "notFound"
+          ? `${update.jiraKey} no longer exists in Jira, so ${update.localKey} is not updated.`
+          : `${update.jiraKey} could not be read, so ${update.localKey} is not updated. ${err instanceof Error ? err.message : String(err)}`;
+      problems.push({ localKey: update.localKey, message });
+      continue;
+    }
+    const diff = diffIssue(update, state, { people: ctx.map.people });
+    warnings.push(...diff.warnings);
+    read.push({ update, state, diff, summary: summaries.get(update.localKey) ?? update.localKey });
+  }
+  return { read, problems, warnings };
+}
+
+function updateView(site: string, { update, diff, summary }: ReadUpdate): JiraUpdateView {
+  return {
+    localKey: update.localKey,
+    summary,
+    jiraKey: update.jiraKey,
+    url: issueUrl(site, update.jiraKey),
+    changes: diff.changes.map(({ fieldId, name, jiraText, vaultText, editable, reason }) => ({
+      fieldId,
+      name,
+      jiraText,
+      vaultText,
+      editable,
+      ...(reason ? { reason } : {}),
+    })),
+  };
 }
 
 // ---------------------------------------------------------------- preview
@@ -237,6 +313,10 @@ export async function previewPush(
 ): Promise<JiraPushPreview> {
   const ctx = await loadContext(service);
   const { plan, items } = await planFor(service, ctx, keys, askValues);
+  const changed = await readUpdates(service, ctx, keys);
+  // A changed item is skipped as a create and listed as an update instead, or
+  // as a problem when its issue cannot be read. Once is enough.
+  const elsewhere = new Set([...changed.read.map((r) => r.update.localKey), ...changed.problems.map((p) => p.localKey)]);
 
   const drafts: JiraDraftView[] = plan.drafts.map((draft) => ({
     localKey: draft.localKey,
@@ -258,10 +338,12 @@ export async function previewPush(
     projectKey: ctx.meta.projectKey,
     projectName: ctx.meta.projectName,
     drafts,
-    warnings: plan.warnings,
+    warnings: [...plan.warnings, ...changed.warnings],
     blockers: plan.blockers,
-    skipped: plan.skipped,
+    skipped: plan.skipped.filter((s) => !elsewhere.has(s.localKey)),
     askFields: askFieldsFor(ctx, askValues),
+    updates: changed.read.map((r) => updateView(ctx.client.site, r)),
+    updateProblems: changed.problems,
     people: ctx.map.people,
     uncertain: (await uncertainAttempts(ctx.root)).map((attempt) => ({
       ...attempt,
@@ -278,6 +360,7 @@ export async function runPush(
   service: VaultService,
   keys: string[],
   askValues: Record<string, unknown>,
+  updateFields: Record<string, JiraUpdateChoice>,
   onProgress: (progress: JiraPushProgress) => void,
 ): Promise<JiraPushOutcome> {
   // A double click must not become two pushes of the same items.
@@ -299,13 +382,139 @@ export async function runPush(
       onProgress,
     });
     const typeOf = new Map(plan.drafts.map((d) => [d.localKey, d.issueType]));
-    return {
+    // The create path skips every changed item, with a reason about updating.
+    // Each is reported once, below: by its update, or as held back.
+    const changedKeys = await service.read(
+      (vault) => new Set(buildUpdatePlan(keys.map((k) => vault.getItem(k)), ctx.map, vault).updates.map((u) => u.localKey)),
+    );
+    const result: JiraPushOutcome = {
       ...outcome,
-      failed: outcome.failed.map((f) => namedFieldErrors(f, ctx.meta, typeOf.get(f.localKey))),
+      updated: [],
+      failed: outcome.failed.map((f) => {
+        const type = typeOf.get(f.localKey);
+        return namedFieldErrors(f, type ? (id) => fieldName(ctx.meta, type, id) : undefined);
+      }),
+      skipped: [
+        ...outcome.skipped.filter((s) => !changedKeys.has(s.localKey)),
+        ...[...changedKeys]
+          .filter((key) => !(key in updateFields))
+          .map((localKey) => ({
+            localKey,
+            reason: "Changed since its push and not updated this time. It is offered again at the next push.",
+          })),
+      ],
     };
+    if (Object.keys(updateFields).length > 0) {
+      await pushUpdates(service, ctx, updateFields, onProgress, result);
+    }
+    return result;
   } finally {
     running = false;
   }
+}
+
+/**
+ * The updates, after the creates, so a parent created a moment ago is in Jira
+ * by the time its child's parent field is compared.
+ *
+ * Jira is read again and every value comes from that fresh diff. The renderer
+ * only says which fields were ticked and which it showed. A ticked field that
+ * no longer differs is dropped without a word, since the issue already says
+ * what the person chose. One that has become uneditable is not sent.
+ *
+ * The item is stamped as matching Jira only when every remaining difference
+ * is one the person saw and decided about. A difference that appeared after
+ * they looked, or a ticked field Jira will no longer take, leaves it unstamped
+ * (`restamp: false`): the ticked fields still go, the item still reads as
+ * changed, and the next push offers what is left.
+ */
+async function pushUpdates(
+  service: VaultService,
+  ctx: PushContext,
+  updateFields: Record<string, JiraUpdateChoice>,
+  onProgress: (progress: JiraPushProgress) => void,
+  result: JiraPushOutcome,
+): Promise<void> {
+  const changed = await readUpdates(service, ctx, Object.keys(updateFields));
+  for (const problem of changed.problems) result.skipped.push({ localKey: problem.localKey, reason: problem.message });
+
+  const names = new Map<string, Map<string, string>>();
+  const editScreens = new Map<string, IssueState["editable"]>();
+  const notes = new Map<string, string>();
+  const choices = changed.read.map(({ update, state, diff }) => {
+    const choice = updateFields[update.localKey];
+    const ticked = new Set(choice?.ticked ?? []);
+    const seen = new Set(choice?.seen ?? []);
+    const fields: Record<string, unknown> = {};
+    const unseen: string[] = [];
+    const locked: string[] = [];
+    for (const change of diff.changes) {
+      if (!seen.has(change.fieldId)) unseen.push(change.name);
+      if (!ticked.has(change.fieldId)) continue;
+      if (change.editable) fields[change.fieldId] = change.value;
+      else locked.push(`${change.name}: ${change.reason ?? "Jira will not take it."}`);
+    }
+    const reasons = [
+      ...(unseen.length ? [`${unseen.join(", ")} changed in Jira since you looked`] : []),
+      ...(locked.length ? [`Jira would not take ${locked.join("; ")}`] : []),
+    ];
+    if (reasons.length) {
+      notes.set(
+        update.localKey,
+        `${update.jiraKey}: ${reasons.join(", and ")}, so ${update.localKey} still reads as changed. Open the pane again to review it.`,
+      );
+    }
+    names.set(update.localKey, new Map(diff.changes.map((c) => [c.fieldId, c.name])));
+    editScreens.set(update.localKey, state.editable);
+    return {
+      localKey: update.localKey,
+      jiraKey: update.jiraKey,
+      ...(update.jiraId ? { jiraId: update.jiraId } : {}),
+      fields,
+      restamp: reasons.length === 0,
+    };
+  });
+
+  const outcome = await sendUpdates(ctx.client, choices, {
+    markPushed: async (localKey, jiraKey, jiraId) => {
+      await service.markPushed(localKey, jiraKey, jiraId);
+    },
+    onProgress: (p) => onProgress(p.state === "failed" ? { ...p, uncertain: false } : p),
+  });
+
+  for (const u of outcome.updated) {
+    const named = names.get(u.localKey);
+    const note = notes.get(u.localKey);
+    result.updated.push({ ...u, fields: u.fields.map((id) => named?.get(id) ?? id), ...(note ? { note } : {}) });
+  }
+  for (const f of outcome.failed) {
+    // Named from the edit screen the PUT went to, not the create screen.
+    const screen = editScreens.get(f.localKey);
+    const named = names.get(f.localKey);
+    result.failed.push({
+      ...namedFieldErrors(f, (id) => screen?.[id]?.name ?? named?.get(id) ?? id),
+      uncertain: false,
+    });
+  }
+}
+
+/**
+ * Restamp a changed item whose issue already matches it, as "Mark as in sync"
+ * asks. Jira is read again first. If it no longer matches, nothing is stamped,
+ * because stamping then would hide a real difference until the next edit.
+ */
+export async function markInSync(service: VaultService, localKey: string): Promise<void> {
+  if (running) throw new Error("A push is running. Mark it once that finishes.");
+  const ctx = await loadContext(service);
+  const changed = await readUpdates(service, ctx, [localKey]);
+  if (changed.problems[0]) throw new Error(changed.problems[0].message);
+  const found = changed.read[0];
+  if (!found) throw new Error(`${localKey} has not changed since its push, so there is nothing to mark.`);
+  if (found.diff.changes.length > 0) {
+    const fields = found.diff.changes.map((c) => c.name).join(", ");
+    throw new Error(`${found.update.jiraKey} no longer matches ${localKey}: ${fields} differ. Push again to update it.`);
+  }
+  await service.markPushed(localKey, found.update.jiraKey, found.update.jiraId);
 }
 
 /**

@@ -16,17 +16,20 @@ export function fieldName(meta: ProjectMeta, issueType: string, fieldId: string)
  * A failure's field errors under the names a person sees in Jira, not
  * `customfield_10001`. The message carries the same `id: error` lines, so
  * they are renamed there too.
+ *
+ * `nameOf` is the screen the request went to: the create screen for a
+ * create (`fieldName` on its issue type), the edit screen for an update.
+ * Undefined when nothing is known to name them by.
  */
 export function namedFieldErrors<F extends { message: string; fieldErrors: Record<string, string> }>(
   failure: F,
-  meta: ProjectMeta,
-  issueType: string | undefined,
+  nameOf: ((fieldId: string) => string) | undefined,
 ): F {
-  if (!issueType || Object.keys(failure.fieldErrors).length === 0) return failure;
+  if (!nameOf || Object.keys(failure.fieldErrors).length === 0) return failure;
   let message = failure.message;
   const fieldErrors: Record<string, string> = {};
   for (const [id, error] of Object.entries(failure.fieldErrors)) {
-    const name = fieldName(meta, issueType, id);
+    const name = nameOf(id);
     fieldErrors[name] = error;
     if (name !== id) message = message.split(`${id}: `).join(`${name}: `);
   }

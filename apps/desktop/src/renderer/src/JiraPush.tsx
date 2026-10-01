@@ -1,25 +1,34 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { JiraDraftView, JiraPushOutcome, JiraPushPreview, JiraPushProgress } from "@shared/api";
+import type {
+  JiraDraftView,
+  JiraPushOutcome,
+  JiraPushPreview,
+  JiraPushProgress,
+  JiraUpdateView,
+} from "@shared/api";
+import { pushButtonLabel, updateFieldChoices } from "@shared/jira-push-label";
+
+import { JiraValueField } from "./JiraValueField";
 
 /** Progress about one item; the push's own "slowed down" has no item. */
 type ItemProgress = Extract<JiraPushProgress, { localKey: string }>;
 
-import { JiraValueField } from "./JiraValueField";
-
 /**
- * The push pane: what would be created in Jira, then the one button that does it.
+ * The push pane: what would be created in Jira and what would be updated
+ * there, then the one button that does both.
  *
  * Everything shown is built in main — the plan, the project's create screens,
- * the stored credential's site — and nothing here can change what is sent
- * except the `ask` fields, whose values go back as choices rather than as a
- * payload. Pressing the button asks main to rebuild the plan from the same
- * keys, so a field made required in Jira since the preview blocks the push
- * rather than failing halfway through it.
+ * each changed issue as Jira holds it now, the stored credential's site — and
+ * nothing here can change what is sent except the `ask` fields and which
+ * changed fields are ticked, which go back as choices rather than as a
+ * payload. Pressing the button asks main to rebuild the plan and read Jira
+ * again, so a field made required since the preview blocks the push, and an
+ * update sends what differs at that moment.
  *
- * The button says what it does — "Create 3 issues in ENG" — because this is the
- * one action in the app that writes somewhere other than the vault, into a
- * tracker other people read.
+ * The button says what it does — "Create 3 and update 1 in ENG" — because
+ * this is the one action in the app that writes somewhere other than the
+ * vault, into a tracker other people read.
  */
 export function JiraPush({
   keys,
@@ -40,6 +49,12 @@ export function JiraPush({
   const [outcome, setOutcome] = useState<JiraPushOutcome | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [showJson, setShowJson] = useState<ReadonlySet<string>>(() => new Set());
+  /**
+   * Changed fields someone unticked, per item. Kept as what was turned off,
+   * not what is on, so a field that appears on a later re-plan starts ticked
+   * like every other.
+   */
+  const [unticked, setUnticked] = useState<Record<string, string[]>>({});
   const requestId = useRef(0);
 
   const load = useCallback(
@@ -80,7 +95,7 @@ export function JiraPush({
       setProgress((cur) => ({ ...cur, [p.localKey]: p }));
     });
     try {
-      const result = await window.vault.jiraPush(keys, askValues);
+      const result = await window.vault.jiraPush(keys, askValues, updateChoices);
       if (result.ok) setOutcome(result.value);
       else setError(result.message);
     } finally {
@@ -106,8 +121,35 @@ export function JiraPush({
 
   const drafts = preview?.drafts ?? [];
   const blockers = preview?.blockers ?? [];
-  const canPush = !loading && !pushing && !outcome && drafts.length > 0 && blockers.length === 0;
+  const updates = preview?.updates ?? [];
+  /**
+   * Changed items the button acts on: those with a field ticked. One with
+   * nothing ticked is left for later, and one that already matches Jira waits
+   * for "Mark as in sync".
+   */
+  const updateChoices = updateFieldChoices(updates, unticked);
+  const toUpdate = Object.keys(updateChoices).length;
+  const canPush =
+    !loading && !pushing && !outcome && drafts.length + toUpdate > 0 && blockers.length === 0;
   const projectLabel = preview ? preview.projectKey : "Jira";
+
+  const setTicked = (localKey: string, fieldId: string, on: boolean): void =>
+    setUnticked((cur) => {
+      const off = new Set(cur[localKey] ?? []);
+      if (on) off.delete(fieldId);
+      else off.add(fieldId);
+      return { ...cur, [localKey]: [...off] };
+    });
+
+  const markInSync = async (localKey: string): Promise<void> => {
+    const result = await window.vault.jiraMarkInSync(localKey);
+    if (result.ok) {
+      setError(null);
+      void load(askValues);
+    } else {
+      setError(result.message);
+    }
+  };
 
   return (
     <div className="modal-backdrop" onClick={pushing ? undefined : onClose}>
@@ -166,26 +208,59 @@ export function JiraPush({
                 </section>
               )}
 
-              <section className="jira-section">
-                <h3>
-                  {drafts.length} issue{drafts.length === 1 ? "" : "s"} to create
-                </h3>
-                {drafts.length === 0 && <p className="field-note">Nothing here needs creating.</p>}
-                <ul className="jira-drafts">
-                  {drafts.map((draft) => (
-                    <DraftRow
-                      key={draft.localKey}
-                      draft={draft}
-                      blocked={blockers.some((b) => b.localKey === draft.localKey)}
-                      open={expanded.has(draft.localKey)}
-                      json={showJson.has(draft.localKey)}
-                      progress={progress[draft.localKey]}
-                      onToggle={() => setExpanded((s) => toggle(s, draft.localKey))}
-                      onToggleJson={() => setShowJson((s) => toggle(s, draft.localKey))}
-                    />
-                  ))}
-                </ul>
-              </section>
+              {(updates.length > 0 || preview.updateProblems.length > 0) && (
+                <section className="jira-section" aria-label="Changed since pushed">
+                  <h3>Changed since pushed</h3>
+                  <p className="field-note">
+                    Jira as it is now, beside the vault. Ticked fields are sent; an unticked one keeps Jira&rsquo;s
+                    value.
+                  </p>
+                  <ul className="jira-drafts">
+                    {updates.map((update) => (
+                      <UpdateRow
+                        key={update.localKey}
+                        update={update}
+                        unticked={unticked[update.localKey] ?? []}
+                        progress={progress[update.localKey]}
+                        disabled={pushing}
+                        onTick={(fieldId, on) => setTicked(update.localKey, fieldId, on)}
+                        onMarkInSync={() => void markInSync(update.localKey)}
+                      />
+                    ))}
+                  </ul>
+                  {preview.updateProblems.length > 0 && (
+                    <ul className="jira-blockers">
+                      {preview.updateProblems.map((p) => (
+                        <li key={p.localKey}>{p.message}</li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              )}
+
+              {/* Left out when the push only updates: "0 issues to create" is noise then. */}
+              {(drafts.length > 0 || updates.length === 0) && (
+                <section className="jira-section">
+                  <h3>
+                    {drafts.length} issue{drafts.length === 1 ? "" : "s"} to create
+                  </h3>
+                  {drafts.length === 0 && <p className="field-note">Nothing here needs creating.</p>}
+                  <ul className="jira-drafts">
+                    {drafts.map((draft) => (
+                      <DraftRow
+                        key={draft.localKey}
+                        draft={draft}
+                        blocked={blockers.some((b) => b.localKey === draft.localKey)}
+                        open={expanded.has(draft.localKey)}
+                        json={showJson.has(draft.localKey)}
+                        progress={progress[draft.localKey]}
+                        onToggle={() => setExpanded((s) => toggle(s, draft.localKey))}
+                        onToggleJson={() => setShowJson((s) => toggle(s, draft.localKey))}
+                      />
+                    ))}
+                  </ul>
+                </section>
+              )}
 
               {preview.warnings.length > 0 && (
                 <section className="jira-section">
@@ -227,9 +302,7 @@ export function JiraPush({
                 Cancel
               </button>
               <button className="btn btn-primary" disabled={!canPush} onClick={() => void push()}>
-                {pushing
-                  ? "Creating…"
-                  : `Create ${drafts.length} issue${drafts.length === 1 ? "" : "s"} in ${projectLabel}`}
+                {pushing ? "Sending…" : pushButtonLabel(drafts.length, toUpdate, projectLabel)}
               </button>
             </>
           )}
@@ -285,11 +358,105 @@ function DraftRow({
   );
 }
 
+/**
+ * One changed item: each differing field as Jira has it now and as the vault
+ * would make it, with a tick for whether to send it. A field the issue's edit
+ * screen will not take is shown, unticked and disabled, with Jira's reason,
+ * so nothing that differs is hidden. An item that already matches Jira has
+ * nothing to send, and only needs marking as in sync.
+ */
+function UpdateRow({
+  update,
+  unticked,
+  progress,
+  disabled,
+  onTick,
+  onMarkInSync,
+}: {
+  update: JiraUpdateView;
+  unticked: readonly string[];
+  progress?: ItemProgress;
+  disabled: boolean;
+  onTick: (fieldId: string, on: boolean) => void;
+  onMarkInSync: () => void;
+}): React.JSX.Element {
+  return (
+    <li className="jira-draft" data-local-key={update.localKey}>
+      <div className="jira-draft-head">
+        <span className="cell-key">{update.localKey}</span>
+        <span className="jira-draft-summary">{update.summary}</span>
+        <a
+          href={update.url}
+          className="pill"
+          onClick={(e) => {
+            e.preventDefault();
+            void window.vault.openTarget({ kind: "external", value: update.url });
+          }}
+        >
+          {update.jiraKey}
+        </a>
+        {progress && <span className={`jira-state jira-state-${progress.state}`}>{progressLabel(progress)}</span>}
+      </div>
+      <div className="jira-draft-body">
+        {update.changes.length === 0 ? (
+          <div className="jira-resolve">
+            <span className="field-note">Jira already matches. Nothing to send.</span>
+            <button type="button" className="btn" disabled={disabled} onClick={onMarkInSync}>
+              Mark as in sync
+            </button>
+          </div>
+        ) : (
+          <table className="jira-changes">
+            <thead>
+              <tr>
+                <th aria-label="Send" />
+                <th>Field</th>
+                <th>Jira now</th>
+                <th aria-hidden="true" />
+                <th>Vault</th>
+              </tr>
+            </thead>
+            <tbody>
+              {update.changes.map((c) => (
+                <tr key={c.fieldId} data-field-id={c.fieldId} className={c.editable ? undefined : "jira-change-locked"}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`Update ${c.name}`}
+                      checked={c.editable && !unticked.includes(c.fieldId)}
+                      disabled={!c.editable || disabled}
+                      onChange={(e) => onTick(c.fieldId, e.target.checked)}
+                    />
+                  </td>
+                  <td title={c.fieldId}>
+                    {c.name}
+                    {c.reason && <div className="field-note">{c.reason}</div>}
+                  </td>
+                  <td>{c.jiraText || <span className="field-note">empty</span>}</td>
+                  <td aria-hidden="true">→</td>
+                  <td>{c.vaultText || <span className="field-note">empty</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {update.changes.length > 0 &&
+          !update.changes.some((c) => c.editable && !unticked.includes(c.fieldId)) && (
+            <p className="field-note">Nothing ticked: left for a later push.</p>
+          )}
+      </div>
+    </li>
+  );
+}
+
 function progressLabel(p: ItemProgress): string {
   switch (p.state) {
     case "creating":
       return "creating…";
+    case "updating":
+      return "updating…";
     case "created":
+    case "updated":
       return p.jiraKey;
     case "failed":
       return p.uncertain ? "unknown" : "failed";
@@ -385,6 +552,31 @@ function Outcome({ outcome }: { outcome: JiraPushOutcome }): React.JSX.Element {
           </ul>
         </section>
       )}
+      {outcome.updated.length > 0 && (
+        <section className="jira-section">
+          <h3>Updated {outcome.updated.length}</h3>
+          <ul className="jira-warnings">
+            {outcome.updated.map((u) => (
+              <li key={u.localKey}>
+                <strong>{u.localKey}</strong> →{" "}
+                <a
+                  href={u.url}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void window.vault.openTarget({ kind: "external", value: u.url });
+                  }}
+                >
+                  {u.jiraKey}
+                </a>{" "}
+                <span className="field-note">
+                  {u.fields.length ? u.fields.join(", ") : "nothing sent; Jira's values kept"}
+                </span>
+                {u.note && <div className="field-note due-overdue">{u.note}</div>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {outcome.failed.length > 0 && (
         <section className="jira-section">
           <h3>Failed {outcome.failed.length}</h3>
@@ -401,15 +593,19 @@ function Outcome({ outcome }: { outcome: JiraPushOutcome }): React.JSX.Element {
         <section className="jira-section">
           <h3>Not sent {outcome.skipped.length}</h3>
           <ul className="jira-warnings">
-            {outcome.skipped.map((s) => (
-              <li key={s.localKey}>
+            {/* An update can add a note per field, so one item may appear twice. */}
+            {outcome.skipped.map((s, i) => (
+              <li key={`${s.localKey}-${i}`}>
                 <strong>{s.localKey}</strong> — {s.reason}
               </li>
             ))}
           </ul>
         </section>
       )}
-      {outcome.created.length === 0 && outcome.failed.length === 0 && outcome.skipped.length === 0 && (
+      {outcome.created.length === 0 &&
+        outcome.updated.length === 0 &&
+        outcome.failed.length === 0 &&
+        outcome.skipped.length === 0 && (
         <p className="field-note">Nothing was sent.</p>
       )}
     </>

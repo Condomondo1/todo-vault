@@ -291,6 +291,40 @@ export interface JiraAskField {
   value: unknown;
 }
 
+/**
+ * One field where an issue already in Jira and its vault item now differ.
+ * Only the texts cross IPC: the value to send stays in main, which reads Jira
+ * again and takes it from a fresh diff at push time.
+ */
+export interface JiraFieldChangeView {
+  fieldId: string;
+  name: string;
+  /** "" when Jira has nothing there. */
+  jiraText: string;
+  /** "" when the vault cleared it. */
+  vaultText: string;
+  /** False when the issue's edit screen will not take it; `reason` says why. */
+  editable: boolean;
+  reason?: string;
+}
+
+/** What the pane decided for one changed item: the fields to send, and every field it showed. */
+export interface JiraUpdateChoice {
+  ticked: string[];
+  /** Ticked or not. A difference outside this set appeared after the person looked. */
+  seen: string[];
+}
+
+/** An item changed since its push, set beside its Jira issue as it is now. */
+export interface JiraUpdateView {
+  localKey: string;
+  summary: string;
+  jiraKey: string;
+  url: string;
+  /** Empty when Jira already matches: nothing to send, only "Mark as in sync". */
+  changes: JiraFieldChangeView[];
+}
+
 /** A push attempt that may or may not have reached Jira. */
 export interface JiraUncertainAttempt {
   localKey: string;
@@ -309,6 +343,10 @@ export interface JiraPushPreview {
   blockers: Array<{ localKey: string; message: string }>;
   skipped: Array<{ localKey: string; reason: string }>;
   askFields: JiraAskField[];
+  /** Items changed since their push, each with what differs from Jira now. */
+  updates: JiraUpdateView[];
+  /** Changed items that cannot be compared, such as an issue deleted in Jira. Not sent. */
+  updateProblems: Array<{ localKey: string; message: string }>;
   /** The map's linked people, for a user field's picker. */
   people: Record<string, JiraPersonLink>;
   /** Must be resolved before these items can be pushed again. */
@@ -320,11 +358,27 @@ export type JiraPushProgress =
   | { localKey: string; state: "created"; jiraKey: string; url: string }
   | { localKey: string; state: "failed"; message: string; uncertain: boolean }
   | { localKey: string; state: "skipped"; reason: string }
+  | { localKey: string; state: "updating" }
+  | { localKey: string; state: "updated"; jiraKey: string; url: string }
   /** Jira answered 429; the push is waiting, not hung. Not about one item. */
   | { state: "slowedDown"; waitMs: number };
 
 export interface JiraPushOutcome {
   created: Array<{ localKey: string; jiraKey: string; jiraId: string; url: string }>;
+  /**
+   * `fields` names what was sent; empty when the item was only marked as
+   * matching Jira. `restamped` is false when a difference the person never
+   * saw or could not send remains, and `note` then says which, so the item
+   * still reads as changed and is offered again.
+   */
+  updated: Array<{
+    localKey: string;
+    jiraKey: string;
+    url: string;
+    fields: string[];
+    restamped: boolean;
+    note?: string;
+  }>;
   /** `fieldErrors` is keyed by Jira's name for the field where the project told us, else its id. */
   failed: Array<{ localKey: string; message: string; fieldErrors: Record<string, string>; uncertain: boolean }>;
   skipped: Array<{ localKey: string; reason: string }>;
@@ -578,7 +632,22 @@ export interface VaultApi {
    * values, not taken from the preview, and a plan with blockers is refused.
    * Progress arrives through `onJiraPushProgress` while this is pending.
    */
-  jiraPush(keys: string[], askValues: Record<string, unknown>): Promise<Result<JiraPushOutcome>>;
+  jiraPush(
+    keys: string[],
+    askValues: Record<string, unknown>,
+    /**
+     * Per changed item to update, the field ids ticked and the ids shown. An
+     * item not listed is left for a later push. Values are never sent from
+     * here: main takes them from a fresh diff, and stamps the item only if
+     * that diff holds nothing beyond what was shown.
+     */
+    updateFields: Record<string, JiraUpdateChoice>,
+  ): Promise<Result<JiraPushOutcome>>;
+  /**
+   * Restamp a changed item whose Jira issue already matches it, after reading
+   * Jira again to be sure. Nothing is sent to Jira.
+   */
+  jiraMarkInSync(localKey: string): Promise<Result<void>>;
   /**
    * Settle an uncertain attempt: `jiraKey` when the issue turned out to exist
    * (it is stamped as pushed), null when it did not (it can be pushed again).
@@ -675,6 +744,7 @@ export const CHANNELS = {
   jiraPreviewPush: "jira:preview-push",
   jiraPush: "jira:push",
   jiraResolveUncertain: "jira:resolve-uncertain",
+  jiraMarkInSync: "jira:mark-in-sync",
   draftItem: "claude:draft",
 
   /** main -> renderer push */

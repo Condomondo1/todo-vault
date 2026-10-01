@@ -4742,3 +4742,97 @@ since pushed* section to the push pane, with a row per field reading *Jira now
 and `jira-mapping` e2e specs pass. **Not verified:** a real site's `editmeta`
 and the shapes it hands back, notably whether `parent` appears on a
 team-managed project's edit screen.
+
+## The push pane updates changed issues ✅ built and driven (app half; Jira push, slice D1)
+
+The app half of the section above. An item changed since its push no longer
+sits in *not sent* with "update not supported yet". The pane shows it beside
+its Jira issue, field by field, and the same button sends what was ticked.
+
+**The pane.** *Changed since pushed* sits above the creates. Each item has its
+key, summary, and a link to the issue, then one row per differing field:
+- name, Jira's value now, →, the vault's value, with "empty" for nothing
+- a tick, on by default
+- a field the edit screen won't take is shown, unticked and disabled, with
+  Jira's reason, so no difference is hidden
+
+An item Jira already matches says so and offers *Mark as in sync*. The button
+counts both halves and leaves out an empty one:
+- *Create 2 issues in ENG*
+- *Update 1 issue in ENG*
+- *Create 2 and update 1 in ENG*
+
+*0 issues to create* is left out when the push only updates. The outcome gains
+an *Updated* list naming the fields sent. Progress shows *updating…* and the key.
+
+**What crosses IPC.** The preview sends only texts and tick state, never values.
+The push sends `updateFields`, the ticked field ids per item. Main then:
+- runs the creates first, so a parent made a moment ago is in Jira before its
+  child's parent field is compared
+- rebuilds the update plan and reads each issue again
+- takes every value from that fresh diff
+- drops a ticked field that no longer differs without a word
+- skips, with its reason, a ticked field that has become uneditable
+
+**Stamped only for what was seen.** OverSeer's review found this. The fresh
+diff at push time can hold a difference nobody saw: someone edits the issue in
+Jira while the pane is open, or a ticked field stops being editable. The pane
+therefore sends, per item, the ids it showed (`seen`) beside those ticked. When
+the fresh diff has a change outside `seen`, or a ticked field Jira will no
+longer take, main sets `restamp: false` (#78). The ticked fields still go, but
+the item keeps reading as changed. The outcome says which, for example *ENG-7:
+Due date changed in Jira since you looked, so ACME-3 still reads as changed*,
+and the next look offers that row.
+
+**Nothing ticked means "not now".** Unticking every field is the only way to
+hold one item back from a push. Such an item is left out of the push: not sent,
+not stamped, and not counted in the button. Its block says *Nothing ticked:
+left for a later push*. With some fields ticked, the unticked ones keep Jira's
+values and the item is restamped, since that is a decision per field. Every
+changed item the push doesn't update is listed once as *not updated this time*.
+`updateFieldChoices` (`shared/jira-push-label.ts`) builds the `{ ticked, seen }`
+per item.
+
+**Mark as in sync** is its own IPC, `jira:mark-in-sync`. It reads Jira again,
+restamps only if the diff is still empty, and sends nothing to Jira. If the
+issue has changed meanwhile, it refuses and names the fields that now differ.
+
+**An unreadable issue is that item's problem only.** A 404 reads *ENG-7 no
+longer exists in Jira, so ACME-3 is not updated*, and that item is left out.
+Any other read failure says the same with Jira's message. The preview drops
+items listed as updates or problems from *not sent*, so none appears twice.
+
+**Field errors from a refused update** are named from the issue's edit screen,
+not the create screen. To allow that, `namedFieldErrors` now takes a name
+lookup instead of a project and issue type.
+
+**Fake Jira.** Each created issue gets three routes:
+- `GET /issue/{key}`, with its type named
+- `/editmeta`: the create screen less project, issue type and reporter
+- `PUT`, which is checked like the create (no field off the edit screen, no
+  non-ADF rich text, no Rank) and applies `null` as a clear
+
+`updated` records exactly what each PUT carried.
+
+**Tests.** 3 unit tests, in `jira-push-label.test.ts` and the updated naming
+test. Three e2e cases:
+- **Update:** push a story, then change its summary and clear its due date in
+  the vault. The pane shows exactly those two rows, ticked; the item isn't
+  under *not sent*. Unticking the due date and pressing *Update 1 issue in ENG*
+  sends one PUT carrying only `summary`. Jira keeps its due date, the item
+  reads pushed, and a third look offers nothing.
+- **A change in Jira after the pane was read:** the pane shows only the
+  summary. The fake then moves the due date before *Update* is pressed. The
+  PUT carries only `summary`, the outcome names the due date, and the item
+  isn't stamped. The next look offers *Due date* (Jira's new date → the
+  vault's), and unticking it leaves the item for a later push, with no button
+  to press.
+- **Mark as in sync, and a deleted issue:** one issue edited the same way on
+  both sides, and another deleted in Jira (its GET answers 404). The pane
+  offers *Mark as in sync* for the first, which stamps it with no PUT, and
+  names the second as no longer in Jira.
+
+A screenshot of the pane was checked by eye. **Not verified:** a refused PUT's
+named field errors through the app, and the "became uneditable between preview
+and push" path. The unseen-change path is driven, but the fake's edit screen
+never changes.

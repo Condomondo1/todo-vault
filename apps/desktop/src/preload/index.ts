@@ -59,7 +59,8 @@ const api: VaultApi = {
   jiraSearchUsers: (query) => ipcRenderer.invoke(CHANNELS.jiraSearchUsers, query),
   clearJiraCredentials: () => ipcRenderer.invoke(CHANNELS.clearJiraCredentials),
   jiraPreviewPush: (keys, askValues) => ipcRenderer.invoke(CHANNELS.jiraPreviewPush, keys, askValues),
-  jiraPush: (keys, askValues) => ipcRenderer.invoke(CHANNELS.jiraPush, keys, askValues),
+  jiraPush: (keys, askValues, updateFields) => ipcRenderer.invoke(CHANNELS.jiraPush, keys, askValues, updateFields),
+  jiraMarkInSync: (localKey) => ipcRenderer.invoke(CHANNELS.jiraMarkInSync, localKey),
   jiraResolveUncertain: (localKey, jiraKey) =>
     ipcRenderer.invoke(CHANNELS.jiraResolveUncertain, localKey, jiraKey),
   onJiraPushProgress: (listener) => {

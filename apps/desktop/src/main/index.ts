@@ -24,6 +24,7 @@ import {
   type JiraMappingChoice,
   type JiraPerson,
   type JiraStatus,
+  type JiraUpdateChoice,
   type MaybeSnapshot,
   type Result,
   type ThemePreference,
@@ -42,7 +43,7 @@ import {
   type StoredJiraCredential,
 } from "./jira-credential.js";
 import { mapState, mappingEdits, normaliseProjectKey } from "./jira-mapping.js";
-import { previewPush, resolveUncertain, runPush } from "./jira-push.js";
+import { markInSync, previewPush, resolveUncertain, runPush } from "./jira-push.js";
 import { CLAUDE_MODEL, draftItem } from "./claude.js";
 import { attachZoomShortcuts, restoreZoom } from "./zoom.js";
 import { applySavedTheme, applyTheme, backgroundColor, currentTheme } from "./theme.js";
@@ -585,13 +586,15 @@ function registerHandlers(): void {
     previewPush(service, keys, askValues ?? {}),
   );
 
-  handle(CHANNELS.jiraPush, (keys: string[], askValues: Record<string, unknown>) =>
-    runPush(service, keys, askValues ?? {}, (progress) => {
+  handle(CHANNELS.jiraPush, (keys: string[], askValues: Record<string, unknown>, updateFields: Record<string, JiraUpdateChoice>) =>
+    runPush(service, keys, askValues ?? {}, updateFields ?? {}, (progress) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send(CHANNELS.jiraPushProgress, progress);
       }
     }),
   );
+
+  handle(CHANNELS.jiraMarkInSync, (localKey: string) => markInSync(service, localKey));
 
   handle(CHANNELS.jiraResolveUncertain, (localKey: string, jiraKey: string | null) =>
     resolveUncertain(service, localKey, jiraKey),
