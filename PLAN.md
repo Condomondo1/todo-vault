@@ -4996,3 +4996,81 @@ a live Claude Desktop or Claude Code session, Claude's drafts against the real
 API, the dark theme and a small window for the new panels, and a real process
 crash between promote's two writes, which the ordering argues for and no test
 reproduces.
+
+## The scratch pad after a day of use: a box that empties, notes that edit ✅ built and driven (#98–#101)
+
+Two complaints came out of the first day of real use, both on 2026-10-01. A note
+added from the sidebar seemed not to be saved, so it was added again. A note,
+once saved, could not be changed, and fixing a typo meant removing it and
+typing it out again. They were written up in IDEAS.md (#98) and built the same
+day, the core by OverSeer (#99) and the app by the Project Lead (#100, #101).
+
+**The box empties as the note is sent, not once it lands.** The report said
+Ctrl+Enter added a note and left the text in the box, and the write-up guessed
+that some window-level handler was saving it without going through `submit`.
+Driving the built app showed otherwise. Ctrl+Enter did nothing in either box;
+plain Enter was what saved. Both boxes did empty, but only after main had
+answered, which is after the git commit. On a vault where a commit takes a
+moment, the text sat in the box long enough to read as "not saved", and nothing
+stopped a second press. So `submit` in both `ScratchSection` and `ScratchPage`
+now clears the box in the keypress that sends the note. A second press finds
+nothing to send, while a new note typed during the save still goes. A refused
+save puts the text back, but only if the box is still empty, so it never
+overwrites what was typed since. A busy flag was tried first and dropped: it
+swallowed the Enter of a note typed while the previous commit was running, and
+the paste spec caught it. Ctrl+Enter now adds too, since it is what saves
+everywhere else. The confirmation reads *Note added to Scratch*, or *N notes
+added to Scratch* for a split paste, and shows only away from the Scratch page,
+where the new card is confirmation enough. Whether the user's own vault commits
+slowly enough to explain the report is not verified.
+
+**An edit is a commit, though the ask was for none.** The request was that
+edits need not be kept in history. Skipping the commit does not achieve that:
+`commit()` stages with `git add -A`, so an uncommitted edit would be swept into
+the next unrelated commit under that commit's subject, which is worse than a
+commit of its own. Keeping notes out of git altogether, by ignoring `scratch/`
+in the vault, would have untracked every existing note and broken the server's
+promise that every write is committed. So `updateScratch(id, text)` makes one
+`Edit scratch note` commit per save, and the app saves when the person is done,
+not per keystroke. Unchanged text writes and commits nothing, which is what
+makes saving on blur free. It shares an add's cleaning and limit through
+`checkScratchText`. Only the body is rewritten, and the frontmatter is copied
+as written, so a field from a newer version survives an edit from an older one.
+The note keeps its id and `created`, and with them its place in the list; an
+`updated` field would have been a schema change for no visible gain. There is
+no MCP tool for it, since Claude can remove and re-add.
+
+**Editing happens on the card.** Double-click a card, or press `e` on the
+selected note, and its rendered Markdown becomes a box. `e` was already
+swallowed on Scratch and already meant "edit" on the other views, so it was
+free to take. Ctrl+Enter or leaving the box saves; Escape cancels, and stops
+the event, because App's own Escape blurs the field and a blur saves. The edit
+lives on the page, keyed by the note's id, not inside the card: each save
+refreshes the list, and a note promoted or removed elsewhere mid-edit takes its
+card with it. When that happens the text moves into a box above the list with
+*Save as a new note* and *Discard*, and Escape there only leaves the box, so a
+slip of the key cannot lose it. One edge is left. Text typed while a save is
+still running, followed by a blur, is not saved by that blur, so the box stays
+open with the text until the next one.
+
+**The promote panel follows an edit.** The write-up called `PromotePanel` safe
+because it prefills only when the note changes. Review found the gap: selecting
+a note to edit it opens the panel, which prefills from the text before the
+edit, so a typo fixed on the card came back in Summary. The panel now refills
+Type, Summary and Description when the same note's text changes, but only the
+fields still equal to what the old text put there. Anything typed over, or
+filled by a Claude draft, is kept. It patches those fields through
+`useItemForm.patchText` rather than reseeding, which would also have cleared
+the priority and due date chosen since. If the rich editor normalizes the
+Markdown, the description counts as touched and is left alone; whether it does
+is not verified.
+
+**Tests.** 250 core tests (4 new over the edit) and 185 desktop tests, typecheck
+clean. New e2e specs drive Ctrl+Enter twice in the sidebar box (one note on
+disk, an empty box, the toast, focus kept), editing (counting `Edit scratch
+note` commits in the vault's log: one per save, none for a cancel or an
+unchanged blur), the rescue of a note removed mid-edit, and Summary following a
+fix made on the card. #100 and #101 both changed `ScratchPage` and were each
+tested alone, so the scratch, edit and paste specs were run again on the merged
+main, 27/27. One flake is open: *More… opens the page* failed once in a full
+run and passed on three reruns, and has not been traced.
