@@ -117,7 +117,8 @@ What you do next depends on why you're here.
 - **A scratch pad** for things that are not items yet: press `Shift+N` anywhere,
   type, and Enter. The Scratch section in the sidebar lists the newest notes;
   `6` opens them all, where `j`/`k` move and `x` removes one (with an Undo).
-  Promoting a note into a real item is not built yet.
+  Select a note to promote it: the form beside it is filled from the note, and
+  `Ctrl+Enter` creates the item and moves to the next note.
 - **Light or dark**: the button at the foot of the sidebar cycles Auto → Light →
   Dark, and is labelled with the state it is in. Auto follows the OS.
 - **A desktop shortcut**, so you stop needing a terminal to start the app: press

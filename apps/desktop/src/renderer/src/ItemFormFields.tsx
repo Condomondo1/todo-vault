@@ -26,6 +26,7 @@ export function ItemFormFields({
   projects,
   reporters,
   summaryRef,
+  onSubmit,
 }: {
   form: ItemForm;
   projects: ProjectSummary[];
@@ -33,6 +34,13 @@ export function ItemFormFields({
   reporters: string[];
   /** For the host to focus the summary when it opens. */
   summaryRef?: React.Ref<HTMLInputElement>;
+  /**
+   * Ctrl+Enter from inside the description editor, which would otherwise keep it
+   * to itself. A host that submits on Ctrl+Enter anywhere in its fields passes
+   * its submit here; the plain inputs and selects need nothing, since the
+   * keystroke bubbles up to the host.
+   */
+  onSubmit?: () => void;
 }): React.JSX.Element {
   const { values, set, parentChoices, descriptionGeneration } = form;
   const [source, setSource] = useState(false);
@@ -209,6 +217,7 @@ export function ItemFormFields({
             key={descriptionGeneration}
             value={values.description}
             onChange={(v) => set("description", v)}
+            onSubmit={onSubmit}
           />
         ) : (
           <>

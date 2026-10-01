@@ -53,6 +53,7 @@ export function RichEditor({
   onChange,
   onCommit,
   onCancel,
+  onSubmit,
 }: {
   value: string;
   /**
@@ -67,6 +68,12 @@ export function RichEditor({
   onCommit?: (next: string) => void;
   /** Escape. Omitted where Escape belongs to something outer, like a dialog. */
   onCancel?: () => void;
+  /**
+   * Ctrl+Enter, for a form that submits on it. The editor claims that chord for
+   * itself and stops it here, so a form around it never hears it; this is how it
+   * is passed on. Called after `onCommit`, if there is one.
+   */
+  onSubmit?: () => void;
 }): React.JSX.Element {
   const [linkForm, setLinkForm] = useState<{ href: string; error: string | null } | null>(null);
   const linkRef = useRef<HTMLInputElement | null>(null);
@@ -169,6 +176,7 @@ export function RichEditor({
           e.preventDefault();
           e.stopPropagation();
           commit();
+          onSubmit?.();
           return;
         }
         if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {

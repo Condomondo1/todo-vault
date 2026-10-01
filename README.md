@@ -42,8 +42,11 @@ every keyboard shortcut, and `Ctrl+K` to search everything.
 notes, a count, and a **+ new** (or `Shift+N`) that jots a note without leaving
 what you are doing. **More…** (or `6`) opens the full page. Notes are global,
 not filed under any project, and each is one file in `scratch/`. Removing one
-sends it to the trash with an Undo. Turning a note into an item is not in the
-app yet.
+sends it to the trash with an Undo. Select a note and a panel opens beside
+it with the item form already filled from the note's text (a local guess, not a
+call to Claude): `Ctrl+Enter` creates the item, the note leaves the pad, and the
+next note is selected. Project, parent and category carry over from one item to
+the next.
 
 **A command line.** Everything the app does, plus diagnostics and exports.
 

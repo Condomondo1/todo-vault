@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ScratchNote, TurnOnHistoryResult } from "todo-vault";
+import type { CreateItemInput, Item, ScratchNote, TurnOnHistoryResult } from "todo-vault";
 import type { MaybeSnapshot, Result, VaultApi, VaultSnapshot } from "@shared/api";
 
 /**
@@ -96,6 +96,20 @@ export interface VaultState {
   removeScratch: (id: string) => Promise<string | null>;
   /** Put a trashed note back, by the filename removeScratch reported. */
   restoreScratch: (file: string) => Promise<{ error: string | null; note: ScratchNote | null }>;
+  /**
+   * Promote a note. Deliberately not createItem: that one selects what it made,
+   * which would open the item's panel over the form this was called from. The
+   * item is reported by key and the caller says where to go.
+   *
+   * `createdKey` is set when the item exists even though `error` is too — the
+   * core's "Created KEY, but the note stayed" case — so a caller can show the
+   * message and still not offer a second Create.
+   */
+  promoteScratch: (
+    id: string,
+    input: CreateItemInput,
+    keep: boolean,
+  ) => Promise<{ error: string | null; item: Item | null; createdKey: string | null }>;
   /** Undo whatever the toast is offering, from whichever trash it came out of. */
   undoLast: () => Promise<void>;
   /**
@@ -382,6 +396,25 @@ export function useVault(): VaultState {
     }
   }, []);
 
+  const promoteScratch = useCallback<VaultState["promoteScratch"]>(async (id, input, keep) => {
+    setBusy(true);
+    try {
+      const result = await window.vault.promoteScratch(id, input, keep);
+      if (!result.ok) {
+        const stayed = /^Created (\S+), but the note stayed/.exec(result.message);
+        return { error: result.message, item: null, createdKey: stayed ? stayed[1] : null };
+      }
+      generation.current += 1;
+      setError(null);
+      setSnapshot(result.value.snapshot);
+      return { error: null, item: result.value.item, createdKey: result.value.item.key };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err), item: null, createdKey: null };
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   const undoLast = useCallback(async () => {
     if (!undo) return;
     if (undo.kind === "items") return restore(undo.files);
@@ -414,6 +447,7 @@ export function useVault(): VaultState {
       addScratch,
       removeScratch,
       restoreScratch,
+      promoteScratch,
       undoLast,
       turnOnHistory,
       lastCreated,
@@ -436,6 +470,7 @@ export function useVault(): VaultState {
       addScratch,
       removeScratch,
       restoreScratch,
+      promoteScratch,
       undoLast,
       turnOnHistory,
     ],

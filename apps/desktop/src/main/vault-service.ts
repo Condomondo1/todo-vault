@@ -13,6 +13,7 @@ import {
   type JiraMap,
   type JiraMapEdit,
   type BulkUpdateResult,
+  type CreateItemInput,
   type DeleteResult,
   type HistoryPage,
   type HistoryQuery,
@@ -484,6 +485,11 @@ export class VaultService extends EventEmitter {
 
   listTrashedScratch(): Promise<ScratchTrashEntry[]> {
     return this.serialize(() => this.requireVault().listTrashedScratch());
+  }
+
+  /** One commit: the item is written, then the note goes to the trash unless `keep`. */
+  promoteScratch(id: string, input: CreateItemInput, keep: boolean): Promise<Item> {
+    return this.write((v) => v.promoteScratch(id, input, { keep }));
   }
 
   restoreScratch(file: string): Promise<ScratchNote> {
