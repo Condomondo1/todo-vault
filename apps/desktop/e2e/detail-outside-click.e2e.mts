@@ -86,6 +86,30 @@ async function clickEmpty(page: Page): Promise<void> {
   await page.mouse.click(x, y);
 }
 
+/**
+ * Click empty space until the panel closes, for the click that follows a write.
+ *
+ * A click while a write is in flight is ignored on purpose (outside-click.ts:
+ * "busy" means "ignore"), and the commit that finishes a rename can still be
+ * running after the file has changed — the test sees the new summary on disk
+ * while the app is still busy. On a loaded machine that gap is long enough for
+ * a single click to land in it and do nothing, which is not the behaviour under
+ * test. So this clicks again, and only when the panel is still there.
+ */
+async function clickEmptyUntilClosed(page: Page): Promise<void> {
+  await eventually(
+    "the panel to close once the app is idle",
+    async () => {
+      if ((await panel(page).count()) === 0) return 0;
+      await clickEmpty(page);
+      await page.waitForTimeout(300);
+      return panel(page).count();
+    },
+    (count) => count === 0,
+    { timeout: 15_000, interval: 50 },
+  );
+}
+
 describe("clicking beside the open item", { concurrency: 1 }, () => {
   let harness: Harness;
   let first: string;
@@ -136,8 +160,7 @@ describe("clicking beside the open item", { concurrency: 1 }, () => {
     // The positive control for this stays() is the close two lines down.
     await stays("the panel after the first click", () => panel(harness.page).count(), 1);
 
-    await clickEmpty(harness.page);
-    await panel(harness.page).waitFor({ state: "detached" });
+    await clickEmptyUntilClosed(harness.page);
   });
 
   test("an unsent comment holds the panel against empty space and other cards", async () => {
