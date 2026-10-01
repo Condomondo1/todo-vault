@@ -3,13 +3,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { Vault, VaultError } from "./vault.js";
+import { SCRATCH_MAX_CHARS, Vault, VaultError } from "./vault.js";
 import { buildPushPlan, loadJiraMap } from "./jira.js";
 import {
   AGENDA_SCOPES,
   CADENCES,
   ITEM_TYPES,
   PRIORITIES,
+  SCRATCH_ID_RE,
   STATUSES,
   itemKey,
   projectKey,
@@ -400,6 +401,27 @@ Use when: you need a project key before creating an item, or want a portfolio-le
 
 // ------------------------------------------------------------------ write
 
+/**
+ * Shared by vault_create_item and vault_scratch_promote, so a promote can never
+ * accept a field a plain create would refuse, or the other way round.
+ */
+const CREATE_ITEM_ARGS = {
+  project: projectKey,
+  type: z.enum(ITEM_TYPES).default("task"),
+  summary: z.string().min(1).max(255),
+  description: z.string().default(""),
+  priority: z.enum(PRIORITIES).optional(),
+  parent: itemKey.optional(),
+  category: z.string().max(60).optional(),
+  assignee: z.string().max(120).optional(),
+  reporter: z.string().max(120).optional(),
+  labels: z.array(z.string().max(60)).optional(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  cadence: z.enum(CADENCES).optional(),
+  estimate: z.number().nonnegative().optional(),
+};
+
 server.registerTool(
   "vault_create_item",
   {
@@ -425,22 +447,7 @@ Returns: { created: { key, ... } }
 Hierarchy rules: epics take no parent; stories, tasks, and bugs may only be parented to an epic; subtasks must have a parent that is a story, task, or bug.
 
 Error handling: returns a message naming the valid options if the project does not exist or the parent is the wrong type.`,
-    inputSchema: {
-      project: projectKey,
-      type: z.enum(ITEM_TYPES).default("task"),
-      summary: z.string().min(1).max(255),
-      description: z.string().default(""),
-      priority: z.enum(PRIORITIES).optional(),
-      parent: itemKey.optional(),
-      category: z.string().max(60).optional(),
-      assignee: z.string().max(120).optional(),
-      reporter: z.string().max(120).optional(),
-      labels: z.array(z.string().max(60)).optional(),
-      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-      dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-      cadence: z.enum(CADENCES).optional(),
-      estimate: z.number().nonnegative().optional(),
-    },
+    inputSchema: CREATE_ITEM_ARGS,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   guard(async (args) => {
@@ -989,15 +996,21 @@ server.registerTool(
 
 Args:
   - projects (boolean, default false): list trashed projects instead of items
+  - scratch (boolean, default false): list trashed scratch notes instead of items
 
-Returns: { entries: [{ file, key, trashedAt, summary?, hasAttachments }] }
+Returns: { entries: [{ file, key, trashedAt, summary?, hasAttachments }] }, or for scratch { entries: [{ file, id, trashedAt, preview? }] }
 
-Pass 'file' to vault_restore_item or vault_restore_project.`,
-    inputSchema: { projects: z.boolean().default(false) },
+Pass 'file' to vault_restore_item, vault_restore_project or vault_scratch_restore.`,
+    inputSchema: { projects: z.boolean().default(false), scratch: z.boolean().default(false) },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
-  guard(async ({ projects }) => {
+  guard(async ({ projects, scratch }) => {
+    if (projects && scratch) throw new VaultError("Pass projects or scratch, not both");
     await vault.load();
+    if (scratch) {
+      const entries = await vault.listTrashedScratch();
+      return ok({ entries }, `${entries.length} recoverable scratch note(s).`);
+    }
     const entries = projects ? await vault.listTrashedProjects() : await vault.listTrash();
     return ok({ entries }, `${entries.length} recoverable ${projects ? "project" : "item"}(s).`);
   }),
@@ -1075,6 +1088,130 @@ Don't use when: they mean a different project — that is vault_move_item_to_pro
   guard(async ({ key, after, before }) => {
     const item = await withFreshVault(() => vault.moveItem(key, { after, before }));
     return ok({ key: item.key, rank: item.rank }, `${item.key} repositioned.`);
+  }),
+);
+
+// ----------------------------------------------------------------- scratch
+
+const scratchId = z.string().regex(SCRATCH_ID_RE, "A scratch note id is a UUID, from vault_scratch_list");
+
+server.registerTool(
+  "vault_scratch_add",
+  {
+    title: "Add a scratch note",
+    description: `Jot something onto the vault's scratch pad: a staging area for text that is not an item yet. A note has no key, project, type or due date, and nothing on the pad is ever pushed to Jira.
+
+Args:
+  - text (string, required): the note, kept as written (indentation included), up to ${SCRATCH_MAX_CHARS.toLocaleString("en")} characters
+
+Returns: { added: { id, created, text } }
+
+Use when: "put this on my scratch pad", "jot this down for later", "park this idea", a pasted snippet or link the user wants kept but has not decided what to do with.
+Don't use when: the request already says what the work is and where it goes — create the item with vault_create_item. The pad is for when that decision has not been made, not a way to avoid asking.`,
+    inputSchema: { text: z.string().min(1) },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  guard(async ({ text }) => {
+    const note = await vault.addScratch(text);
+    return ok({ added: note }, "Added to the scratch pad.");
+  }),
+);
+
+server.registerTool(
+  "vault_scratch_list",
+  {
+    title: "List scratch notes",
+    description: `The notes on the scratch pad, newest first, with their full text.
+
+Args:
+  - limit (number, 1-200, default 50)
+
+Returns: { total, count, notes: [{ id, created, text }], errors }
+
+'errors' names note files that would not parse; they are skipped, not lost.
+
+Use when: "what's on my scratch pad", or before vault_scratch_promote or vault_scratch_remove, which need a note's id.`,
+    inputSchema: { limit: z.number().int().min(1).max(200).default(50) },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  guard(async ({ limit }) => {
+    const { notes, errors } = await vault.listScratch();
+    const shown = notes.slice(0, limit);
+    return ok(
+      { total: notes.length, count: shown.length, notes: shown, errors },
+      `${notes.length} note(s) on the scratch pad.`,
+    );
+  }),
+);
+
+server.registerTool(
+  "vault_scratch_remove",
+  {
+    title: "Remove a scratch note (recoverable)",
+    description: `Move a note to .trash/scratch/. Recoverable: vault_list_trash with scratch: true finds it, vault_scratch_restore brings it back.
+
+Args:
+  - id (string, required): from vault_scratch_list
+
+Returns: { removed: { id, file, trashedTo } }
+
+Use when: the user says a note is done with, not needed, or already dealt with.
+Don't use when: the note is becoming an item — vault_scratch_promote does both in one step.`,
+    inputSchema: { id: scratchId },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  },
+  guard(async ({ id }) => {
+    const removed = await vault.removeScratch(id);
+    return ok({ removed }, "Removed from the scratch pad. Recoverable with vault_scratch_restore.");
+  }),
+);
+
+server.registerTool(
+  "vault_scratch_restore",
+  {
+    title: "Restore a trashed scratch note",
+    description: `Put a removed note back on the scratch pad, unchanged.
+
+Args:
+  - file (string, required): from vault_list_trash with scratch: true — a bare filename, not a path
+
+Returns: { restored: { id, created, text } }`,
+    inputSchema: { file: z.string().min(1) },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  guard(async ({ file }) => {
+    const note = await vault.restoreScratch(file);
+    return ok({ restored: note }, "Restored to the scratch pad.");
+  }),
+);
+
+server.registerTool(
+  "vault_scratch_promote",
+  {
+    title: "Turn a scratch note into an item",
+    description: `Create an item from a scratch note and take the note off the pad, as one write and one commit ("Promote scratch note to <KEY>"). Use this rather than vault_create_item followed by vault_scratch_remove, which is two commits and strands a duplicate if the second step fails.
+
+The note's text is NOT copied into the item for you. Read it with vault_scratch_list, then write the summary (imperative, naming the outcome) and put whatever detail is worth keeping in description. Nothing about the pad is added to the item; the commit subject is the record of where it came from.
+
+Args:
+  - id (string, required): the note, from vault_scratch_list
+  - keep (boolean, default false): create the item but leave the note on the pad, for "one thought, two items"
+  - every argument vault_create_item takes: project and summary required, and the same hierarchy rules for parent
+
+Returns: { created: { key, ... } }
+
+Errors: a create that fails validation changes nothing. An error beginning "Created <KEY>, but the note stayed on the scratch pad" means the item WAS created — do not retry; remove the note with vault_scratch_remove instead.
+
+Use when: "turn my scratch notes into tickets", "make that note a task on ACME". Confirm the project and type with the user when the note does not make them obvious.`,
+    inputSchema: { id: scratchId, keep: z.boolean().default(false), ...CREATE_ITEM_ARGS },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  guard(async ({ id, keep, ...input }) => {
+    const item = await withFreshVault(() => vault.promoteScratch(id, input, { keep }));
+    return ok(
+      { created: detail(item) },
+      `Created ${item.key}${keep ? "; the note is still on the scratch pad." : " and took the note off the scratch pad."}`,
+    );
   }),
 );
 
