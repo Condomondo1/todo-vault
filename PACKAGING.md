@@ -16,30 +16,26 @@ Nothing in the repo does that yet: there is no `electron-builder`, no
 `electron-forge`, no `build` config anywhere. Everything in the second half of
 this document is a plan, not a recipe that has been run.
 
-Two things the shortcut leaves for packaging to fix, beyond portability. It
-launches whatever is in `out/` rather than building — no longer *silently*,
-since it now checks after starting the app and offers to run the update, but
-still without the automatic in-place upgrade an installer plus `electron-updater`
-would give. And it inherits the app's lack of a single-instance lock, so a second
-double-click opens a second window over the same vault.
+One thing the shortcut leaves for packaging, beyond portability: it launches
+whatever is in `out/` and then offers to run the update, with no automatic
+in-place upgrade like an installer plus `electron-updater` would give. A second
+double-click is fine: the app keeps one instance and brings the open window
+forward.
 
 ## What `out/` actually is
 
-`npm run build -w @todo-vault/desktop` produces about 1.2 MB:
+`npm run build -w @todo-vault/desktop` produces about 2.6 MB:
 
 | | |
 |---|---|
-| `out/main/index.js` | ~446 kB — the main process, with `todo-vault` bundled in |
-| `out/preload/index.js` | ~4 kB — CJS, because a sandboxed preload cannot be ESM |
-| `out/renderer/` | ~770 kB JS + ~24 kB CSS, plus `index.html` |
+| `out/main/index.js` | ~600 kB — the main process, with `todo-vault` bundled in |
+| `out/preload/index.js` | ~8 kB — CJS, because a sandboxed preload cannot be ESM |
+| `out/renderer/` | ~2 MB JS + ~66 kB CSS, plus `index.html` |
 
 That is *only* the application code. It needs Electron's ~350 MB runtime around
-it, which is not in the repo and is not in `out/`. This is the whole reason a
-copied folder cannot just be run on the far machine, and the whole reason
-packaging is a real step rather than a flag. The desktop shortcut is not a
-counter-example: it points `wscript.exe` at a launcher that runs
-`node_modules/electron/dist/electron.exe`, so it depends on exactly the runtime
-this section is about, and does nothing on a machine that has not installed it.
+it, which is not in the repo and is not in `out/`. That is why a copied folder
+cannot just be run on the far machine. The desktop shortcut runs
+`node_modules/electron/dist/electron.exe`, so it needs that runtime too.
 
 `out/` is gitignored, so it never travels with a clone. Neither does
 `node_modules/`. Both are rebuilt on the far end.
@@ -49,9 +45,9 @@ this section is about, and does nothing on a machine that has not installed it.
 On the new machine:
 
 ```bash
-winget install OpenJS.NodeJS     # Node 24.18.0 is what this is built against
-git clone <your remote>
-cd files
+winget install OpenJS.NodeJS     # Node 24 is what this is built against; 22 is the floor
+git clone https://github.com/rellik92j/todo-vault.git
+cd todo-vault
 npm install                      # seconds; Electron is not fetched yet
 npm run build                    # first run downloads Electron, ~350 MB
 npm run dev
@@ -62,20 +58,15 @@ The shortcut has to be made on each machine rather than travelling with the
 repo: a `.lnk` stores absolute paths, and the ones on the machine that wrote it
 are meaningless on the next. Re-running it is also the fix for moving the clone.
 
-**Electron downloads on first `require()`, not on install.** Electron 43
-declares no install script, so `npm install` finishes fast and the first build
-pauses to fetch the runtime. That is what `ensure-electron` — wired to `predev`
-and `prebuild` — is forcing. The zip is cached in
-`%LOCALAPPDATA%\electron\Cache`, so a second project on the same machine
-extracts from cache instead of re-downloading.
+**Electron downloads on the first build, not on install.** `npm install`
+finishes fast and the first build pauses to fetch the runtime. The zip is cached
+in `%LOCALAPPDATA%\electron\Cache`, so it happens once per machine.
 
 **Copying the folder instead of cloning is fine**, as long as you exclude
-`node_modules/` and `apps/desktop/out/`. A zip preserves bytes exactly, so line
-endings are safe; a git transfer is safe too, because `.gitattributes` pins
-`eol=lf`. Without that pin git would check files out as CRLF on Windows, the app
-would rewrite them as LF, and every vault file would read as wholly modified.
+`node_modules/` and `apps/desktop/out/`. Line endings are safe either way:
+`.gitattributes` pins `eol=lf`.
 
-### Three things that do not travel
+### Four things that do not travel
 
 **The vault.** It is its own git repository and the code repo gitignores
 `/vault/`, so a clone gives you the app with no data in it. Copy the vault
@@ -84,9 +75,13 @@ the exercise is testing in a real working environment, decide this deliberately
 rather than discovering it on the far end.
 
 **The Anthropic API key.** It is encrypted with Electron's `safeStorage`, which
-on Windows is DPAPI — bound to your user account on this machine. There is no
-getter on the IPC surface and no export path, by design. Re-enter it in
-Settings → Claude on the new machine.
+on Windows is DPAPI, bound to your user account on this machine. There is no
+export path, by design. Re-enter it with the **Claude** button at the foot of
+the sidebar.
+
+**The Jira connection.** The site, email and API token are encrypted the same
+way. Connect again with the **Jira** button, on its Connection tab. The mapping
+itself lives in the vault's `jira-map.yaml`, so it travels with the vault.
 
 **Which vault was last open.** That lives in `settings.json` under
 `app.getPath('userData')`, which is per-machine, so a fresh machine gets the
@@ -94,11 +89,10 @@ first-run picker.
 
 ### One thing worth checking on arrival
 
-**Git needs to be on PATH** for history to accrue. `Vault.commit()` shells out
-with `cwd` set to the vault root, and it is non-fatal by design — a machine
-without git accepts every write and silently keeps no history. The sidebar's
-"history on / history off" dot reports the truth, and `vault git-status` says it
-in more detail. Check it once rather than assuming.
+**Git needs to be on PATH** for history to accrue. A machine without git accepts
+every write and keeps no history. The sidebar's "history on / history off" dot
+reports the truth. If it's off and git is installed, the banner's **Turn on
+history** sets it up.
 
 ## Packaging: the next steps
 
@@ -137,9 +131,9 @@ and bundles only the workspace core:
 externalizeDepsPlugin({ exclude: ["todo-vault"] })
 ```
 
-So `chokidar` and `@anthropic-ai/sdk` — and `zod`, `yaml` and the MCP SDK
-underneath the core — are `require`d from `node_modules` at runtime rather than
-being compiled in. In an npm workspace those are hoisted to the **root**
+So `chokidar` and `@anthropic-ai/sdk` are `require`d from `node_modules` at
+runtime rather than being compiled in. Those two are the whole list: the core's
+own dependencies, such as `zod` and `yaml`, are bundled with it. In an npm workspace those are hoisted to the **root**
 `node_modules`, not `apps/desktop/node_modules`, and electron-builder packs
 relative to the app directory. This is the most likely thing to need fixing
 before a packaged build will start.
@@ -194,5 +188,5 @@ that ever stops being true.
 - [ ] `suggestedVault()` given a sensible packaged-app default
 - [ ] Built app launched on a machine with no Node installed
 - [ ] A vault created from scratch through the picker, not just opened
-- [ ] The API key entered and used once, to confirm `safeStorage` works in a packaged context
+- [ ] The API key and a Jira connection entered and used once, to confirm `safeStorage` works in a packaged context
 - [ ] Decided what happens to `scripts/launch.vbs` and `npm run shortcut` — an installer makes its own Start Menu and desktop entries, so the two would overlap. Keep them for the from-source workflow, or retire them; do not leave both writing a `todo-vault.lnk` without saying which wins

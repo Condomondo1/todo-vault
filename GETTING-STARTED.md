@@ -24,9 +24,7 @@ winget install OpenJS.NodeJS
 ```
 
 Node 22 is the floor and 24 is what this is developed against; CI runs both.
-Anything older cannot run the test suite at all, which is why the floor is where
-it is rather than being a guess. Restart your terminal after installing so
-`node` and `npm` are on `PATH`.
+Restart your terminal after installing so `node` and `npm` are on `PATH`.
 
 ## 2. Install Git (recommended)
 
@@ -77,10 +75,8 @@ npm run menu
 ```
 
 Everything from here is a keypress. The first launch of **Dev app** or **Prod
-preview** triggers Electron's runtime download (~350 MB) as a side effect of
-building core, since Electron 43 fetches on first `require()` rather than on
-`npm install`. The zip is cached in `%LOCALAPPDATA%\electron\Cache`, so this
-only happens once per machine, not once per project.
+preview** downloads Electron's runtime (~350 MB). It is cached in
+`%LOCALAPPDATA%\electron\Cache`, so this happens once per machine.
 
 What you do next depends on why you're here.
 
@@ -97,8 +93,10 @@ What you do next depends on why you're here.
 
 1. Press `2` (Prod preview) or `1` (Dev app) — no need to seed first.
 2. In the app, click **Choose a folder…**. Pick an empty folder and confirm
-   **Create a vault here** to start blank, or point it at a vault copied over
-   from another machine (copy it separately first; it's its own git repo).
+   **Create a vault here** to start blank. Leave **Keep an undo history with
+   git** ticked; it's offered when git is on `PATH`. Or point it at a vault
+   copied over from another machine (copy it separately first; it's its own
+   git repo).
 
 ## 6. A few things to set up once you're in
 
@@ -107,27 +105,24 @@ What you do next depends on why you're here.
   DPAPI and bound to this machine, so it has to be re-entered on every new
   computer — there's no export/import path, by design.
 - **Git history**: the sidebar shows a "history on / history off" dot for the
-  open vault. Run `npm run vault -- git-status --vault ./vault` for detail if
-  it's off and you expected it on. When it's on, press `5` for the History view,
-  which reads the commits back as field changes rather than as patches; an item's
-  own history is at the bottom of its detail panel, behind **Show history**.
+  open vault. If it's off, a banner at the top of the window offers **Turn on
+  history**, and asks for a name and email if git has none set. When it's on,
+  press `5` for the History view, which reads the commits back as field changes;
+  an item's own history is at the bottom of its detail panel, behind **Show
+  history**.
 - **Press `?`** for every keyboard shortcut. `1`–`5` move between Backlog,
-  Board, Agenda, Calendar and History. Ctrl+`+`/`−`/`0` size the text, and
-  the level is remembered across launches — worth setting once on a new display
-  rather than squinting at the default.
+  Board, Agenda, Calendar and History. **Ctrl+K** searches every item and
+  project, whatever the current filter. Ctrl+`+`/`−`/`0` size the text, and the
+  level is remembered across launches.
 - **Light or dark**: the button at the foot of the sidebar cycles Auto → Light →
-  Dark, and is labelled with the state it is *in* rather than the one pressing
-  would move to. Auto follows the OS. The choice is saved and applied before the
-  window is created, so a dark start never flashes white on the way in.
+  Dark, and is labelled with the state it is in. Auto follows the OS.
 - **A desktop shortcut**, so you stop needing a terminal to start the app: press
   `D` in the menu, or `npm run shortcut`. It writes `todo-vault.lnk` to your
-  desktop, and a double-click starts the app with no console window and nothing
-  left running behind it. It launches whatever is currently built rather than
-  building — but it checks straight afterwards, and offers to run the update or
-  the build for you if either is due, so this is not something to remember.
-  One caveat that remains: there's no single-instance lock, so double-clicking
-  twice gives you two windows onto the same vault. Re-run `npm run shortcut` if
-  you ever move the repo — it rewrites the shortcut in place.
+  desktop, and a double-click starts the app with no console window. It
+  launches whatever is currently built, then offers to run the update or the
+  build if either is due. Double-clicking it while the app is open brings that
+  window forward instead of starting a second copy. Re-run `npm run shortcut`
+  if you ever move the repo; it rewrites the shortcut in place.
 
 ## 7. Connect Claude to the vault (optional)
 
@@ -158,6 +153,20 @@ Two things to know when it appears not to work. The config points at
 no error, the vault tools just never show up. Pressing `C` checks for that build
 and warns you before printing.
 
+## 8. Connect Jira (optional)
+
+Only if you push reviewed items into a Jira Cloud project. Click **Jira** at the
+foot of the sidebar:
+- On **Connection**, enter the site, your Atlassian email and an API token, and
+  press **Connect**. It checks the pair with Jira before saving it, encrypted,
+  on this machine.
+- On **Mapping**, load the project and choose its issue types.
+
+Then **Push to Jira…** from the bulk bar, an item's detail panel or Ctrl+K shows
+what would be sent before anything is. README's
+[Pushing to Jira](README.md#pushing-to-jira) covers the rest: extra fields,
+people, updating issues that changed, and the CSV route.
+
 ## Updating an existing copy
 
 Already cloned and just want the latest changes? `npm run menu`, then press
@@ -175,19 +184,9 @@ npm run dev
 ```
 
 **If you start the app from the desktop shortcut, `U` on its own is not
-enough.** It rebuilds the core and stops there, which is the right amount of
-work for `npm run dev` and `npm run preview` because both build the desktop
-bundle themselves on the way to launching. The shortcut builds nothing — that is
-the trade it makes for starting instantly — and the desktop bundle has the core
-compiled *into* it, so a rebuilt core sitting in `packages/core/dist` changes
-nothing about what the shortcut opens. Press `7` (Build) after `U`, or run
-`npm run build`, which covers both workspaces. Skipping it used to look like an
-update that silently did nothing.
-
-You no longer have to remember this, which is the point — the shortcut checks
-after it starts the app and offers to run the build for you. Treat the note
-above as the explanation for why that dialog appears, rather than as something
-to keep in your head.
+enough.** It rebuilds the core only, and the shortcut builds nothing itself. Press
+`7` (Build) after `U`, or run `npm run build`. The shortcut also checks after it
+starts and offers to run the build for you, which is why that dialog appears.
 
 ### If the pull refuses over package-lock.json
 
@@ -196,11 +195,8 @@ error: Your local changes to the following files would be overwritten by merge:
         package-lock.json
 ```
 
-Nothing of yours is in that file. `npm install` edits the lockfile when what is
-already sitting in `node_modules` satisfies the versions `package.json` asks
-for — which happens as soon as you check out a branch that moved a dependency,
-since `node_modules` is shared across every branch. Throw the edit away and the
-pull brings the real copy:
+Nothing of yours is in that file; `npm install` rewrote it. Throw the edit away
+and the pull brings the real copy:
 
 ```bash
 git restore package-lock.json
@@ -229,12 +225,8 @@ npm run typecheck       # both workspaces, plus scripts/
 npm run vault -- agenda week --vault ./vault   # CLI, run from repo root
 ```
 
-`npm run menu` is worth knowing about on a machine you only use the app on.
-It lists these commands, runs the picked one, and returns to the list when it
-finishes — so you do not have to remember any of the names above. The sequences
-live in the scripts themselves, which is why `npm run preview` builds the core
-before launching: that is the step that is easy to forget, and skipping it
-produces a fresh-looking app wrapped around a stale core.
+`npm run menu` lists these commands, runs the one you pick, and returns to the
+list when it finishes, so you don't have to remember any of the names above.
 
 Set `VAULT_DIR` as an environment variable to skip passing `--vault` on every
 CLI call.
