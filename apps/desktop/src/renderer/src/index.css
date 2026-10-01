@@ -3249,6 +3249,45 @@ kbd.pill {
   color: var(--text-faint);
 }
 
+/* A note being edited: its text in a box, where its Markdown was. */
+.scratch-edit textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  outline: 0;
+  padding: 6px 8px;
+  max-height: 60vh;
+  cursor: text;
+}
+
+.scratch-edit .field-note {
+  display: block;
+  margin-top: 4px;
+}
+
+.scratch-gone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.scratch-orphan {
+  margin: 10px 16px 0;
+  padding: 10px 12px;
+  background: var(--bg-raised);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+}
+
 .scratch-x {
   min-width: 24px;
   height: 24px;

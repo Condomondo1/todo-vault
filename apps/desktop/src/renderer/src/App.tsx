@@ -182,6 +182,8 @@ export function App(): React.JSX.Element {
   // A fresh number asks the Scratch page's capture box for focus. Null leaves it
   // alone, which is what opening a particular note wants.
   const [captureFocus, setCaptureFocus] = useState<number | null>(null);
+  // A fresh number asks the page to open the selected note for editing (`e`).
+  const [noteEdit, setNoteEdit] = useState<number | null>(null);
   const [version, setVersion] = useState<string | null>(null);
   // The promote panel. What the last promote used, kept here so it survives the
   // panel closing; a number that asks the panel's Summary for focus; and the
@@ -582,6 +584,12 @@ export function App(): React.JSX.Element {
     [vault, view, showScratch],
   );
 
+  /** Replace a note's text from its card. The card itself shows the result. */
+  const updateNote = useCallback(
+    async (id: string, text: string): Promise<string | null> => (await vault.updateScratch(id, text)).error,
+    [vault],
+  );
+
   /** Add a note from the page's own box. The note is already on screen, so no toast. */
   const addNoteFromPage = useCallback(
     async (text: string): Promise<string | null> => (await vault.addScratch(text)).error,
@@ -906,6 +914,13 @@ export function App(): React.JSX.Element {
             event.preventDefault();
             focusCapture();
             return;
+          case "e":
+            if (scratchSelected) {
+              // Or the "e" lands in the box it opens.
+              event.preventDefault();
+              setNoteEdit((n) => (n ?? 0) + 1);
+            }
+            return;
           // Into the promote panel's Summary. These must not fall through to
           // the item shortcuts below, which would act on whatever item was
           // selected before the page was opened.
@@ -918,7 +933,6 @@ export function App(): React.JSX.Element {
             return;
           // The filter row is hidden here, so "/" would focus an input nobody can see.
           case "/":
-          case "e":
           case "h":
           case "l":
           case "ArrowLeft":
@@ -1765,8 +1779,10 @@ export function App(): React.JSX.Element {
               notes={scratch}
               selectedId={scratchSelected}
               focusToken={captureFocus}
+              editToken={noteEdit}
               onSelect={setScratchSel}
               onAdd={addNoteFromPage}
+              onUpdate={updateNote}
               onAddMany={(lines) => addManyNotes(lines, false)}
               onRemove={(id) => void removeNote(id)}
               onOpenLink={(href) => void window.vault.openTarget({ kind: "external", value: href })}

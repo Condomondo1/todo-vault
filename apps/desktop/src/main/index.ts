@@ -447,6 +447,10 @@ function registerHandlers(): void {
     const note = await service.addScratch(text);
     return { snapshot: await service.snapshot(), note };
   });
+  handle(CHANNELS.updateScratch, async (id: string, text: string) => {
+    const note = await service.updateScratch(id, text);
+    return { snapshot: await service.snapshot(), note };
+  });
   handle(CHANNELS.removeScratch, async (id: string) => {
     const removed = await service.removeScratch(id);
     return { snapshot: await service.snapshot(), removed };

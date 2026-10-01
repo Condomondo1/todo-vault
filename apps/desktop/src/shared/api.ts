@@ -572,6 +572,12 @@ export interface VaultApi {
   listScratch(): Promise<Result<{ notes: ScratchNote[]; errors: string[] }>>;
   /** Add a note. Resolves with it, so a caller can select it. */
   addScratch(text: string): Promise<Result<{ snapshot: VaultSnapshot; note: ScratchNote }>>;
+  /**
+   * Replace a note's text, keeping its id and created, so it keeps its place.
+   * Unchanged text is no write and no commit. Refused with "No scratch note <id>"
+   * once the note is gone (promoted or removed elsewhere while it was edited).
+   */
+  updateScratch(id: string, text: string): Promise<Result<{ snapshot: VaultSnapshot; note: ScratchNote }>>;
   /** Trash a note. `file` in the result is what restoreScratch takes. */
   removeScratch(id: string): Promise<Result<{ snapshot: VaultSnapshot; removed: RemoveScratchResult }>>;
   listTrashedScratch(): Promise<Result<ScratchTrashEntry[]>>;
@@ -753,6 +759,7 @@ export const CHANNELS = {
   listTrash: "vault:list-trash",
   listScratch: "scratch:list",
   addScratch: "scratch:add",
+  updateScratch: "scratch:update",
   removeScratch: "scratch:remove",
   listTrashedScratch: "scratch:list-trash",
   restoreScratch: "scratch:restore",

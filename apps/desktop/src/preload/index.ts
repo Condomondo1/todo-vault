@@ -39,6 +39,7 @@ const api: VaultApi = {
   listTrash: () => ipcRenderer.invoke(CHANNELS.listTrash),
   listScratch: () => ipcRenderer.invoke(CHANNELS.listScratch),
   addScratch: (text) => ipcRenderer.invoke(CHANNELS.addScratch, text),
+  updateScratch: (id, text) => ipcRenderer.invoke(CHANNELS.updateScratch, id, text),
   removeScratch: (id) => ipcRenderer.invoke(CHANNELS.removeScratch, id),
   listTrashedScratch: () => ipcRenderer.invoke(CHANNELS.listTrashedScratch),
   restoreScratch: (file) => ipcRenderer.invoke(CHANNELS.restoreScratch, file),
