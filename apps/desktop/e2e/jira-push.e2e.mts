@@ -206,6 +206,127 @@ describe(
       ]);
       assert.deepEqual(sent[REGION_FIELD], { id: "r1", child: { id: "r11" } });
       assert.equal(RANK_FIELD in sent, false);
+      await pane().getByRole("button", { name: "Done" }).click();
+      await pane().waitFor({ state: "hidden" });
+    });
+
+    test("an item changed since its push is updated field by field, sending only what was ticked", async () => {
+      const vault = await Vault.open(harness.vaultRoot);
+      const item = await vault.createItem({ project: "ACME", type: "story", summary: "Send the reminder", dueDate: "2026-11-02" });
+      await itemRow(harness.page, item.key).waitFor({ state: "visible" });
+      await itemRow(harness.page, item.key).locator('input[type="checkbox"]').check();
+
+      await harness.page.locator(".bulk-bar").getByRole("button", { name: "Push to Jira…" }).click();
+      const create = pane().getByRole("button", { name: "Create 1 issue in ENG" });
+      await eventually("the plan has no blockers", () => create.isEnabled(), (on) => on);
+      await create.click();
+      await pane().getByText("Created 1").waitFor();
+      await pane().getByRole("button", { name: "Done" }).click();
+      await pane().waitFor({ state: "hidden" });
+      const jiraKey = project.created.at(-1)!.key;
+
+      // Changed in the vault after the push, behind the app's back.
+      await (await Vault.open(harness.vaultRoot)).updateItem(item.key, { summary: "Send the second reminder", dueDate: null });
+      await eventually(
+        "the change is on screen",
+        () => itemRow(harness.page, item.key).innerText(),
+        (text) => text.includes("Send the second reminder"),
+      );
+
+      const putsBefore = project.updated.length;
+      await harness.page.locator(".bulk-bar").getByRole("button", { name: "Push to Jira…" }).click();
+      const changed = pane().getByRole("region", { name: "Changed since pushed" }).locator(`[data-local-key="${item.key}"]`);
+      await changed.waitFor();
+      const row = (id: string) => changed.locator(`tr[data-field-id="${id}"]`);
+      assert.match(await row("summary").innerText(), /Send the reminder\s*→\s*Send the second reminder/);
+      assert.match(await row("duedate").innerText(), /2026-11-02\s*→\s*empty/);
+      assert.equal(await row("summary").getByRole("checkbox").isChecked(), true, "ticked by default");
+      // Not listed again under "not sent", now that it is an update.
+      assert.equal(await pane().getByText(/so it is updated there rather than created again/).count(), 0);
+
+      // Keep Jira's due date; send only the summary.
+      await row("duedate").getByRole("checkbox").uncheck();
+      const otherRows = await changed.locator("tr[data-field-id]").evaluateAll((rows) =>
+        rows.map((r) => r.getAttribute("data-field-id")),
+      );
+      for (const id of otherRows) if (id !== "summary" && id !== "duedate") await row(id!).getByRole("checkbox").uncheck();
+
+      const update = pane().getByRole("button", { name: "Update 1 issue in ENG" });
+      await eventually("the button enables", () => update.isEnabled(), (on) => on);
+      await update.click();
+      await pane().getByText("Updated 1").waitFor();
+
+      assert.equal(project.updated.length, putsBefore + 1, "one PUT");
+      const put = project.updated.at(-1)!;
+      assert.equal(put.key, jiraKey);
+      assert.deepEqual(put.fields, { summary: "Send the second reminder" }, "only the ticked field, never the unticked due date");
+      const issue = project.created.find((c) => c.key === jiraKey)!;
+      assert.equal(issue.fields.duedate, "2026-11-02", "Jira keeps its due date");
+      await eventually(
+        "the item restamped on disk",
+        async () => (await Vault.open(harness.vaultRoot)).getItem(item.key).sync,
+        (sync) => sync.state === "pushed" && sync.jiraKey === jiraKey,
+      );
+      await pane().getByRole("button", { name: "Done" }).click();
+      await pane().waitFor({ state: "hidden" });
+
+      // A third look: the unticked due date was a decision, so nothing is offered again.
+      await harness.page.locator(".bulk-bar").getByRole("button", { name: "Push to Jira…" }).click();
+      await pane().getByText("0 issues to create").waitFor();
+      assert.equal(await pane().getByRole("region", { name: "Changed since pushed" }).count(), 0);
+      assert.equal(await pane().getByRole("button", { name: /^Create 0 issues/ }).isDisabled(), true);
+      await pane().getByRole("button", { name: "Cancel" }).click();
+      await pane().waitFor({ state: "hidden" });
+    });
+
+    test("an item Jira already matches is only marked as in sync, and a deleted issue is said, not sent", async () => {
+      const vault = await Vault.open(harness.vaultRoot);
+      const same = await vault.createItem({ project: "ACME", type: "story", summary: "Chase the refund" });
+      const gone = await vault.createItem({ project: "ACME", type: "story", summary: "Archive the receipts" });
+      for (const key of [same.key, gone.key]) {
+        await itemRow(harness.page, key).waitFor({ state: "visible" });
+        await itemRow(harness.page, key).locator('input[type="checkbox"]').check();
+      }
+      await harness.page.locator(".bulk-bar").getByRole("button", { name: "Push to Jira…" }).click();
+      const create = pane().getByRole("button", { name: "Create 2 issues in ENG" });
+      await eventually("the plan has no blockers", () => create.isEnabled(), (on) => on);
+      await create.click();
+      await pane().getByText("Created 2").waitFor();
+      await pane().getByRole("button", { name: "Done" }).click();
+      await pane().waitFor({ state: "hidden" });
+      const [sameIssue, goneIssue] = project.created.slice(-2);
+
+      // The same edit made on both sides, and the other issue deleted in Jira.
+      const after = await Vault.open(harness.vaultRoot);
+      await after.updateItem(same.key, { summary: "Chase the refund today" });
+      await after.updateItem(gone.key, { summary: "Archive every receipt" });
+      sameIssue.fields.summary = "Chase the refund today";
+      jira.route("GET", `/rest/api/3/issue/${goneIssue.key}`, () => ({
+        status: 404,
+        body: { errorMessages: ["Issue does not exist or you do not have permission to see it."], errors: {} },
+      }));
+      await eventually(
+        "both changes on screen",
+        () => harness.page.locator("table.table").innerText(),
+        (text) => text.includes("Chase the refund today") && text.includes("Archive every receipt"),
+      );
+
+      const puts = project.updated.length;
+      await harness.page.locator(".bulk-bar").getByRole("button", { name: "Push to Jira…" }).click();
+      const section = pane().getByRole("region", { name: "Changed since pushed" });
+      await section.getByText(`${goneIssue.key} no longer exists in Jira, so ${gone.key} is not updated.`).waitFor();
+      const matching = section.locator(`[data-local-key="${same.key}"]`);
+      await matching.getByText("Jira already matches. Nothing to send.").waitFor();
+      assert.equal(await pane().getByRole("button", { name: /^Update/ }).count(), 0, "nothing to update by the button");
+
+      await matching.getByRole("button", { name: "Mark as in sync" }).click();
+      await matching.waitFor({ state: "detached" });
+      assert.equal(project.updated.length, puts, "marking sends nothing to Jira");
+      const stamped = (await Vault.open(harness.vaultRoot)).getItem(same.key).sync;
+      assert.equal(stamped.state, "pushed");
+      assert.equal(stamped.jiraKey, sameIssue.key);
+      await pane().getByRole("button", { name: "Cancel" }).click();
+      await pane().waitFor({ state: "hidden" });
     });
   },
 );
