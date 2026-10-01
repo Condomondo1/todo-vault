@@ -311,7 +311,7 @@ test("the app's push holds back an item changed since its push instead of creati
   const held = buildPushPlan(await items(vault), map(), vault, { holdDrifted: true });
   assert.deepEqual(held.drafts, []);
   const reason = held.skipped.find((s) => s.localKey === edited.key)?.reason ?? "";
-  assert.match(reason, /Changed since it was pushed as ENG-2\. Updating an existing issue is not supported yet/);
+  assert.match(reason, /Changed since it was pushed as ENG-2, so it is updated there rather than created again/);
 
   const planned = buildPushPlan(await items(vault), map(), vault);
   assert.deepEqual(planned.drafts.map((d) => d.localKey), [edited.key], "the MCP and CSV planners still offer it, with a warning");

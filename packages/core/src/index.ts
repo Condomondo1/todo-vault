@@ -57,6 +57,8 @@ export type { Tickable } from "./recurrence.js";
 export {
   blocksToWiki,
   buildPushPlan,
+  buildUpdatePlan,
+  changedSincePush,
   fieldsTheMapCanFill,
   jiraMapPath,
   loadJiraMap,
@@ -96,6 +98,16 @@ export type {
   PushProgress,
   SendOptions,
 } from "./jira-push.js";
+export { diffIssue, readIssueState, sendUpdates } from "./jira-update.js";
+export type {
+  JiraFieldChange,
+  IssueDiff,
+  IssueState,
+  UpdateChoice,
+  UpdateOutcome,
+  UpdateProgress,
+  UpdateSendOptions,
+} from "./jira-update.js";
 export {
   ALWAYS_SENT,
   distinctFields,
@@ -127,6 +139,8 @@ export type {
   JiraPushBlocker,
   JiraPushPlan,
   JiraIssueDraft,
+  JiraIssueUpdate,
+  JiraUpdatePlan,
   PushPlanOptions,
   JiraCsvColumn,
   JiraCsvOptions,
