@@ -316,7 +316,7 @@ the desktop app sends anything to Jira**, and only after you have reviewed it.
 
 ### From the app
 
-**1. Connect.** Press **Jira** in the toolbar.
+**1. Connect.** Press **Jira** at the foot of the sidebar.
 - Enter your site, your email and an API token from
   [id.atlassian.com](https://id.atlassian.com/manage-profile/security/api-tokens).
   Classic and scoped tokens both work.

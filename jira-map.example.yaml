@@ -1,9 +1,9 @@
 # Jira field mapping.
 #
-# The desktop app writes this for you: press Jira in the toolbar, connect, then
-# use the Mapping tab. It starts from this very text and edits values in place,
-# so these comments survive. You can also copy it to <vault>/jira-map.yaml and
-# fill it in by hand. Almost every
+# The desktop app writes this for you: press Jira at the foot of the sidebar,
+# connect, then use the Mapping tab. It starts from this very text and edits
+# values in place, so these comments survive. You can also copy it to
+# <vault>/jira-map.yaml and fill it in by hand. Almost every
 # value below differs between Jira sites, which is why this is config and not
 # code.
 #
