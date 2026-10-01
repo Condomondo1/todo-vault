@@ -1,8 +1,9 @@
 # Jira field mapping.
 #
-# Copy this to <vault>/jira-map.yaml and fill it in for YOUR instance, or let
-# the desktop app's Settings → Jira write it for you: the app starts from this
-# very text and edits values in place, so these comments survive. Almost every
+# The desktop app writes this for you: press Jira in the toolbar, connect, then
+# use the Mapping tab. It starts from this very text and edits values in place,
+# so these comments survive. You can also copy it to <vault>/jira-map.yaml and
+# fill it in by hand. Almost every
 # value below differs between Jira sites, which is why this is config and not
 # code.
 #
@@ -33,7 +34,7 @@ baseUrl: https://yourcompany.atlassian.net
 
 # "site" for a classic API token, sent to baseUrl. "scoped" for a scoped token,
 # which Atlassian only accepts through its API gateway; the gateway needs the
-# site's cloud id, which Settings → Jira looks up for you.
+# site's cloud id, which the app looks up for you.
 auth: site
 # cloudId: 11111111-2222-3333-4444-555555555555
 
@@ -83,35 +84,44 @@ fields:
 
 # People, as the vault spells them, to Jira accounts. Jira Cloud identifies a
 # person by account id, never by name, so an assignee with no entry here is
-# pushed unassigned (and the push says so). Settings → Jira fills this in by
-# searching the people who can be assigned in the project. Names are matched
+# pushed unassigned (and the push says so). The app's Mapping tab fills this in
+# by searching the people who can be assigned in the project. Names are matched
 # case-insensitively.
 people: {}
 #  dan okafor: { accountId: "5b10ac8d82e05b22cc7d4ef5", displayName: "Dan Okafor" }
 
-# Jira fields the vault has no equivalent for, and what to send in them. Values
-# are written already in the shape Jira's create API takes, by id where Jira
-# offers one. "always" sends the value on every issue; "ask" offers it, prefilled,
+# Jira fields the vault has no equivalent for, and what to send in them. Write a
+# value the way you would say it: an option's name, a paragraph of text, a
+# person's name from people above, a comma list, "Parent / Child" for a
+# two-level select. The push builds Jira's JSON from it, checked against the
+# project's own options, so a name Jira does not offer stops the push and says
+# what it does offer. A value already in Jira's shape ({ id: "10021" }) is sent
+# as it is. "always" sends the value on every issue; "ask" offers it, prefilled,
 # in the push pane, where it can be changed for that one push. issueTypes limits
 # a field to the issue types whose create screen has it.
 extraFields: {}
 #  customfield_10001:
 #    name: Team
 #    mode: always
-#    value: "36885b3c-1bf0-4f85-a357-c5b858c31de4"
+#    value: Payments
+#  customfield_10100:
+#    name: Project objective
+#    mode: ask
+#    value: Cut checkout time by **half**.
 #  fixVersions:
 #    name: Fix versions
 #    mode: ask
-#    value: [{ id: "10021" }]
+#    value: 1.4, 1.5
 #    issueTypes: [Story, Bug]
 
 # The older form of extraFields: sent on every issue, no names, no asking.
-# Still read; Settings → Jira offers to move these into extraFields.
+# Still read, and sent exactly as written; the app's Mapping tab offers to move
+# these into extraFields.
 defaults: {}
 
-# Local status -> Jira transition name. Issues are created in the project's
-# default status, so anything not starting in "To Do" needs a transition applied
-# after creation.
+# Local status -> Jira transition name. Not applied yet: issues are created in
+# the project's default status, and moving them on after creation is planned,
+# not built. Filling this in now does no harm and is read once it is.
 statusTransitions:
   in_progress: Start work
   in_review: Ready for review

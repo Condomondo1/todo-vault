@@ -1092,7 +1092,7 @@ Args:
 
 Returns: { jiraProjectKey, drafts: [{ localKey, parentLocalKey?, fields }], attachments, skipped, warnings }
 
-Drafts are ordered so every parent is created before its children. Items already pushed and unchanged are skipped. Descriptions are converted to Atlassian Document Format.
+Drafts are ordered so every parent is created before its children. Items already pushed and unchanged are skipped. An item changed since its push is drafted again as a new issue, with a warning: updating the existing issue is done from the desktop app's push pane, which shows the differences field by field. Descriptions are converted to Atlassian Document Format.
 
 Use when: "what would go to Jira", "prepare the sprint items for push".
 Don't use when: you want the items themselves — use vault_list_items.`,
@@ -1116,7 +1116,7 @@ server.registerTool(
   "vault_mark_pushed",
   {
     title: "Record a completed Jira push",
-    description: `Record that a local item now exists in Jira. Call this after the issue has actually been created so future plans skip it and drift detection has a baseline.
+    description: `Record that a local item now exists in Jira. Call this after the issue has actually been created so future plans skip it and drift detection has a baseline. It also re-stamps an item whose Jira issue was brought up to date by hand. It rebuilds the item's sync record from these arguments alone, so pass jiraId again when re-stamping, or the stored id is lost.
 
 Args:
   - key (string, required): local item key

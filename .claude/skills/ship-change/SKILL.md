@@ -199,8 +199,12 @@ gh pr merge --merge --delete-branch
 ```
 
 `gh pr checks --watch` blocks until the workflow finishes and exits non-zero if
-anything failed. If it reports no checks at all, the workflow did not trigger —
-worth a look, but not a reason to block a merge.
+anything failed. Run straight after `gh pr create`, it can race the workflow
+and report no checks. Wait for them to appear first:
+`until gh pr checks N | grep -q .; do sleep 3; done`. `main` is protected, so
+the merge is refused until `typecheck + tests (Node 22)`, `(Node 24)` and
+`build` all pass. A PR with merge conflicts runs no CI at all, so rebase it
+first.
 
 `--merge` rather than `--squash` is deliberate. A merge commit keeps the
 individual commits inside the PR available to `git bisect` and `git blame`, while

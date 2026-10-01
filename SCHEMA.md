@@ -427,6 +427,20 @@ Changing the summary will. So will moving an item into `in_progress` for the
 first time, because that writes `startDate`, which is pushed — a status change
 on its own is not drift, but the date it stamps is.
 
+**`drifted` is a label, and the hash decides.** Any edit to a pushed item moves
+`pushed → drifted`, and nothing moves it back except a fresh stamp. So an item
+edited and then reverted still reads `drifted` while matching what Jira holds.
+Everything that decides what to send compares the hash instead
+(`changedSincePush`). The stamp is written by `markPushed`, which runs at four
+points:
+- a create
+- an update from the app's push pane
+- **Mark as in sync**, when Jira already matches
+- `jira record` / `vault_mark_pushed` after a push made elsewhere
+
+It rebuilds `sync` from what it is given, so `jiraId` must be passed every time
+or it is lost. `pending` is in the schema but nothing sets it today.
+
 "Fields that actually get pushed" has twice turned out to be narrower in
 `pushableFields` than in the code that does the pushing, and both times the
 symptom was silence: the item read as pushed-and-unchanged while Jira held

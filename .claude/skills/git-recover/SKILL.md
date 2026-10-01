@@ -12,9 +12,10 @@ is expensive to undo.** One question decides which category a mistake is in.
 
 Before that line, you are rewriting your own private history and nothing outside
 this machine has seen it. After it, you fix forward with a revert instead of
-rewriting. This repo is single-author with no branch protection, so the genuinely
-expensive category is nearly empty — and even a `reset --hard` that eats a commit
-is recoverable via the reflog (last section).
+rewriting. `main` is protected: it refuses force-pushes, and a PR merges only
+once its three CI checks pass. So anything already on `main` is fixed forward,
+never rewritten. A feature branch is still yours to rewrite, and even a
+`reset --hard` that eats a commit is recoverable via the reflog (last section).
 
 **Before running anything destructive**, take a seatbelt. It costs one command:
 
@@ -90,7 +91,8 @@ git revert <sha>
 This adds a new commit that undoes the old one. It is safe precisely because it
 adds history rather than rewriting it.
 
-Rewriting is possible here — single author, no protection — but it is the option
+On `main`, rewriting is not available: protection refuses the force-push. On a
+feature branch nobody else has pulled, it is possible, and it is still the option
 to reach for last:
 
 ```bash
