@@ -92,9 +92,9 @@ export interface VaultState {
    * the box that was typed into.
    */
   addScratch: (text: string) => Promise<{ error: string | null; note: ScratchNote | null }>;
-  /** Trash a note and offer Undo. Resolves to an error message, or null. */
   /** Replace a note's text. Same resolve as addScratch. */
   updateScratch: (id: string, text: string) => Promise<{ error: string | null; note: ScratchNote | null }>;
+  /** Trash a note and offer Undo. Resolves to an error message, or null. */
   removeScratch: (id: string) => Promise<string | null>;
   /** Put a trashed note back, by the filename removeScratch reported. */
   restoreScratch: (file: string) => Promise<{ error: string | null; note: ScratchNote | null }>;

@@ -584,13 +584,13 @@ export function App(): React.JSX.Element {
     [vault, view, showScratch],
   );
 
-  /** Add a note from the page's own box. The note is already on screen, so no toast. */
   /** Replace a note's text from its card. The card itself shows the result. */
   const updateNote = useCallback(
     async (id: string, text: string): Promise<string | null> => (await vault.updateScratch(id, text)).error,
     [vault],
   );
 
+  /** Add a note from the page's own box. The note is already on screen, so no toast. */
   const addNoteFromPage = useCallback(
     async (text: string): Promise<string | null> => (await vault.addScratch(text)).error,
     [vault],
