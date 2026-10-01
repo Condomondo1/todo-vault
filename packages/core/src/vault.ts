@@ -697,6 +697,19 @@ export class Vault {
   }
 
   async createItem(rawInput: unknown): Promise<Item> {
+    const item = await this.writeNewItem(rawInput);
+    await this.commit(`Add ${item.key}: ${item.summary}`);
+    return item;
+  }
+
+  /**
+   * Everything createItem does except the commit: validate, allocate a key,
+   * claim it by creating the file exclusively, index it. Split out so a caller
+   * that writes more than the item (promoteScratch) can commit the lot once.
+   * The key-collision retry stays in here, around the write alone, because a
+   * retry has to re-allocate before anything else is touched.
+   */
+  private async writeNewItem(rawInput: unknown): Promise<Item> {
     this.assertLoaded();
     const input = CreateItemInput.parse(rawInput);
 
@@ -754,12 +767,10 @@ export class Vault {
       const key = await this.allocateKey(input.project, above);
       const frontmatter = ItemFrontmatterSchema.parse({ ...draft, key });
       try {
-        const item = await this.writeAndIndex(
+        return await this.writeAndIndex(
           { ...frontmatter, description: input.description ?? "" },
           true,
         );
-        await this.commit(`Add ${key}: ${frontmatter.summary}`);
-        return item;
       } catch (err) {
         if (!hasErrorCode(err, "EEXIST")) throw err;
         if (attempt >= MAX_KEY_ATTEMPTS) {
@@ -1443,20 +1454,76 @@ export class Vault {
 
   /** Move a note to `.trash/scratch/`. Recoverable with restoreScratch. */
   async removeScratch(id: string): Promise<RemoveScratchResult> {
-    // `id` may arrive over IPC or MCP, so it never gets to name a path.
-    if (!SCRATCH_ID_RE.test(id)) throw new VaultError(`Not a scratch note id: ${id}`);
+    assertScratchId(id);
+    const removed = await this.trashScratchFile(id);
+    if (!removed) throw new VaultError(`No scratch note ${id}`);
+    await this.commit("Trash scratch note");
+    return removed;
+  }
 
+  /**
+   * Turn a note into an item in one commit: write the item, trash the note
+   * (unless `keep`), then commit once, as `Promote scratch note to <KEY>`.
+   *
+   * The order is the guarantee. The item is written first, so a crash or a
+   * failure between the two steps leaves a duplicate — the note and the item
+   * both — never a lost note. A create that fails validation throws before
+   * anything is written, and the note is untouched. The note goes to the trash
+   * rather than being deleted, so a promote can be walked back by hand: delete
+   * the item, restore the note.
+   *
+   * A note that vanishes after the item is written (the other process removed
+   * it in the gap) is not an error: the item exists and the note is gone, which
+   * is the state a promote asks for.
+   */
+  async promoteScratch(
+    id: string,
+    rawInput: unknown,
+    opts: { keep?: boolean } = {},
+  ): Promise<Item> {
+    assertScratchId(id);
+    // Checked up front so promoting a note that is already gone creates
+    // nothing. The note's text is not used: the caller has already turned it
+    // into the summary and description it wants.
+    if (!(await pathExists(this.scratchPath(id)))) {
+      throw new VaultError(`No scratch note ${id}`);
+    }
+
+    const item = await this.writeNewItem(rawInput);
+    let trashFailure: unknown;
+    if (!opts.keep) {
+      try {
+        await this.trashScratchFile(id);
+      } catch (err) {
+        trashFailure = err;
+      }
+    }
+    // Committed even when the trash step failed: the item exists either way,
+    // and leaving it uncommitted would fold it silently into whatever write
+    // comes next.
+    await this.commit(`Promote scratch note to ${item.key}`);
+    if (trashFailure !== undefined) {
+      // Said plainly, because a caller that took this for "nothing happened"
+      // and retried would create the item twice.
+      throw new VaultError(
+        `Created ${item.key}, but the note stayed on the scratch pad: ` +
+          `${trashFailure instanceof Error ? trashFailure.message : String(trashFailure)}`,
+      );
+    }
+    return item;
+  }
+
+  /** Rename a note into `.trash/scratch/`. Undefined when there was no such note. */
+  private async trashScratchFile(id: string): Promise<RemoveScratchResult | undefined> {
     const stamp = nowIso().replace(/[:.]/g, "-");
     const file = `${id}-${stamp}.md`;
     await fs.mkdir(this.scratchTrashDir, { recursive: true });
     try {
       await fs.rename(this.scratchPath(id), path.join(this.scratchTrashDir, file));
     } catch (err) {
-      if (hasErrorCode(err, "ENOENT")) throw new VaultError(`No scratch note ${id}`);
+      if (hasErrorCode(err, "ENOENT")) return undefined;
       throw err;
     }
-
-    await this.commit("Trash scratch note");
     return { id, file, trashedTo: `.trash/${SCRATCH_DIR}/${file}` };
   }
 
@@ -2540,6 +2607,11 @@ function keyNumber(key: string): number {
 const SCRATCH_TRASH_RE = new RegExp(
   `^(${SCRATCH_ID_RE.source.slice(1, -1)})-(\\d{4}-\\d{2}-\\d{2}T[\\d-]+Z)\\.md$`,
 );
+
+/** An id may arrive over IPC or MCP, so it never gets to name a path. */
+function assertScratchId(id: string): void {
+  if (!SCRATCH_ID_RE.test(id)) throw new VaultError(`Not a scratch note id: ${id}`);
+}
 
 /**
  * `expectedId` is the filename's id. A file whose frontmatter names a different

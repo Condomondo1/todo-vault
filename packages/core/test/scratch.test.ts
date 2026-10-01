@@ -219,3 +219,118 @@ test("keyFromPath reads both scratch locations", () => {
   });
   assert.deepEqual(keyFromPath("scratch/notes.txt"), { subject: "other" });
 });
+
+// ---------------------------------------------------------------- promote
+
+async function promotable(): Promise<Vault> {
+  const vault = await gitVault();
+  await vault.createProject({ key: "ACME", name: "Acme rollout" });
+  return vault;
+}
+
+async function commitCount(dir: string): Promise<number> {
+  const { stdout } = await execFileAsync("git", ["rev-list", "--count", "HEAD"], { cwd: dir });
+  return Number.parseInt(stdout.trim(), 10);
+}
+
+test("promote writes the item and trashes the note in one commit", async () => {
+  const vault = await promotable();
+  const note = await vault.addScratch("Renew the parking permit\nexpires end of Oct");
+  const before = await commitCount(vault.root);
+
+  const item = await vault.promoteScratch(note.id, {
+    project: "ACME",
+    type: "task",
+    summary: "Renew the parking permit",
+    description: "expires end of Oct",
+  });
+
+  assert.equal(item.key, "ACME-1");
+  assert.equal(vault.getItem("ACME-1").description, "expires end of Oct");
+  assert.deepEqual((await vault.listScratch()).notes, []);
+  assert.equal((await vault.listTrashedScratch())[0]?.id, note.id);
+
+  assert.equal(await commitCount(vault.root), before + 1);
+  assert.equal((await subjects(vault.root))[0], "Promote scratch note to ACME-1");
+  const [entry] = (await vault.history()).entries;
+  assert.deepEqual(
+    entry?.files.map((f) => [f.subject, f.kind]).sort(),
+    [
+      ["item", "added"],
+      ["scratch", "trashed"],
+    ],
+  );
+});
+
+test("promote with keep leaves the note on the pad, still one commit", async () => {
+  const vault = await promotable();
+  const note = await vault.addScratch("one thought, two items");
+  const before = await commitCount(vault.root);
+
+  await vault.promoteScratch(note.id, { project: "ACME", type: "task", summary: "First" }, { keep: true });
+
+  assert.deepEqual((await vault.listScratch()).notes, [note]);
+  assert.equal(await commitCount(vault.root), before + 1);
+  assert.equal((await subjects(vault.root))[0], "Promote scratch note to ACME-1");
+});
+
+test("a promote that fails validation writes nothing and keeps the note", async () => {
+  const vault = await promotable();
+  const note = await vault.addScratch("keep me");
+  const before = await commitCount(vault.root);
+
+  await assert.rejects(
+    vault.promoteScratch(note.id, { project: "NOPE", type: "task", summary: "x" }),
+    /Project NOPE does not exist/,
+  );
+  await assert.rejects(
+    vault.promoteScratch(note.id, { project: "ACME", type: "task", summary: "x".repeat(256) }),
+  );
+
+  assert.deepEqual((await vault.listScratch()).notes, [note]);
+  assert.equal(vault.listItems().total, 0);
+  assert.equal(await commitCount(vault.root), before);
+});
+
+test("promoting a note that is gone creates no item", async () => {
+  const vault = await promotable();
+  const note = await vault.addScratch("removed elsewhere");
+  await vault.removeScratch(note.id);
+
+  await assert.rejects(
+    vault.promoteScratch(note.id, { project: "ACME", type: "task", summary: "x" }),
+    /No scratch note/,
+  );
+  await assert.rejects(
+    vault.promoteScratch("../items/ACME-1", { project: "ACME", type: "task", summary: "x" }),
+    /Not a scratch note id/,
+  );
+  assert.equal(vault.listItems().total, 0);
+});
+
+test("createItem is still one commit of its own after the split", async () => {
+  const vault = await promotable();
+  const before = await commitCount(vault.root);
+  await vault.createItem({ project: "ACME", type: "task", summary: "Plain create" });
+  assert.equal(await commitCount(vault.root), before + 1);
+  assert.equal((await subjects(vault.root))[0], "Add ACME-1: Plain create");
+});
+
+test("if the note cannot be trashed, the item is kept and committed and the error says so", async () => {
+  // The order is the guarantee: item first, note second. A failure in between
+  // leaves both, a duplicate rather than a lost note. A file where the
+  // .trash/scratch folder should be makes the second step fail on cue.
+  const vault = await promotable();
+  const note = await vault.addScratch("survives a failed trash");
+  await fs.mkdir(path.join(vault.root, ".trash"), { recursive: true });
+  await fs.writeFile(path.join(vault.root, ".trash", "scratch"), "in the way");
+  const before = await commitCount(vault.root);
+
+  await assert.rejects(
+    vault.promoteScratch(note.id, { project: "ACME", type: "task", summary: "Kept" }),
+    /Created ACME-1, but the note stayed on the scratch pad/,
+  );
+  assert.equal(vault.getItem("ACME-1").summary, "Kept");
+  assert.deepEqual((await vault.listScratch()).notes, [note]);
+  assert.equal(await commitCount(vault.root), before + 1);
+});

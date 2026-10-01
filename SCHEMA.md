@@ -264,7 +264,15 @@ call, newest first, and returns a broken file in `errors` instead of throwing.
 vaults made before the pad have none.
 
 Removing a note moves it to `.trash/scratch/<id>-<timestamp>.md`, and
-`restoreScratch` puts it back byte for byte. The frontmatter schema is
+`restoreScratch` puts it back byte for byte.
+
+`promoteScratch(id, input, { keep })` turns a note into an item in one commit,
+`Promote scratch note to <KEY>`. The item is written first and the note trashed
+second (unless `keep`), so a failure between the two leaves a duplicate rather
+than a lost note; if the note cannot be trashed, the item is still committed
+and the error names its key. Provenance lives only in that commit subject. The
+item's description is what a Jira push sends as the issue body, so nothing
+about the pad is written into it. The frontmatter schema is
 passthrough rather than strict, so a field added by a newer build does not
 make an older one drop the note.
 
