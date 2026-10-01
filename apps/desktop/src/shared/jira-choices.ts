@@ -82,13 +82,46 @@ export function peopleChoices(people: Readonly<Record<string, JiraPersonLink>>):
     .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
 }
 
-/** The account a stored person value names: `{ accountId }`, or a typed id. */
+/** The account a stored `{ accountId }` names. A typed string is not one; see `chosenPeople`. */
 export function accountIdOf(value: unknown): string | undefined {
-  if (value && typeof value === "object") {
-    const id = (value as { accountId?: unknown }).accountId;
-    return typeof id === "string" ? id : undefined;
-  }
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  if (!value || typeof value !== "object") return undefined;
+  const id = (value as { accountId?: unknown }).accountId;
+  return typeof id === "string" ? id : undefined;
+}
+
+/** One person in a user field: a known account, or text written by hand that names nobody linked. */
+export type ChosenPerson = { accountId: string } | { typed: string };
+
+/**
+ * A user field's stored value as the people it names, read the way the core's
+ * `shapeUser` reads it: `{ accountId }` as it is, a name through the map's
+ * people (case-folded), and a string shaped like an account id as one. Anything
+ * else stays the text it was. Wrapping a name in `{ accountId }` would send
+ * Jira an account that does not exist, where left as text the push can still
+ * look it up or block on it by name.
+ *
+ * Accepts one value, an array, or a comma string, since a hand-written map can
+ * hold any of them.
+ */
+export function chosenPeople(value: unknown, people: Readonly<Record<string, JiraPersonLink>>): ChosenPerson[] {
+  const entries = Array.isArray(value) ? value : typeof value === "string" ? parseList(value) : value == null ? [] : [value];
+  return entries.flatMap((entry): ChosenPerson[] => {
+    const id = accountIdOf(entry);
+    if (id) return [{ accountId: id }];
+    if (typeof entry !== "string" || !entry.trim()) return [];
+    const typed = entry.trim();
+    const wanted = typed.toLowerCase();
+    for (const [name, link] of Object.entries(people)) {
+      if (name.trim().toLowerCase() === wanted) return [{ accountId: link.accountId }];
+    }
+    if (/^[0-9a-f]{24}$/i.test(typed) || /^\d+:[0-9a-f-]{36}$/i.test(typed)) return [{ accountId: typed }];
+    return [{ typed }];
+  });
+}
+
+/** What a picker stores for its people: accounts as `{ accountId }`, unresolved text as text. */
+export function storedPeople(chosen: ChosenPerson[]): unknown[] {
+  return chosen.map((c) => ("accountId" in c ? { accountId: c.accountId } : c.typed));
 }
 
 /** A list value as the text of a comma input. A string is shown as it was typed. */

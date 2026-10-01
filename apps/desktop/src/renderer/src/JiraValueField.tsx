@@ -5,6 +5,9 @@ import type { JiraAskField, JiraChoice, JiraPerson, JiraPersonLink } from "@shar
 import {
   accountIdOf,
   cascadingIndexes,
+  chosenPeople,
+  storedPeople,
+  type ChosenPerson,
   cascadingValue,
   listText,
   localDatetime,
@@ -286,19 +289,24 @@ function PeoplePicker({
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<Search>({ state: "idle" });
 
-  const chosen = (multiple ? (Array.isArray(field.value) ? field.value : []) : [field.value])
-    .map(accountIdOf)
-    .filter((id): id is string => Boolean(id));
-  const nameOf = (id: string): string =>
-    names[id] ?? linked.find((c) => accountIdOf(c.value) === id)?.label ?? id;
+  // Names written by hand into the map are resolved the way the push will
+  // resolve them; one that names nobody linked stays text, never a fake account.
+  const chosen = chosenPeople(field.value, people);
+  const keyOf = (c: ChosenPerson): string => ("accountId" in c ? `a:${c.accountId}` : `t:${c.typed}`);
+  const labelOf = (c: ChosenPerson): string =>
+    "accountId" in c
+      ? (names[c.accountId] ?? linked.find((l) => accountIdOf(l.value) === c.accountId)?.label ?? c.accountId)
+      : c.typed;
+  const ids = chosen.flatMap((c) => ("accountId" in c ? [c.accountId] : []));
 
-  const set = (ids: string[]): void => {
-    const values = ids.map((accountId) => ({ accountId }));
+  const set = (next: ChosenPerson[]): void => {
+    const values = storedPeople(next);
     onChange(multiple ? values : (values[0] ?? null));
   };
   const add = (who: { accountId: string; displayName?: string }): void => {
     if (who.displayName) setNames((n) => ({ ...n, [who.accountId]: who.displayName as string }));
-    set(multiple ? [...chosen.filter((id) => id !== who.accountId), who.accountId] : [who.accountId]);
+    const person = { accountId: who.accountId };
+    set(multiple ? [...chosen.filter((c) => keyOf(c) !== keyOf(person)), person] : [person]);
     setSearch({ state: "idle" });
     setQuery("");
   };
@@ -310,20 +318,24 @@ function PeoplePicker({
     setSearch(result.ok ? { state: "done", results: result.value } : { state: "failed", message: result.message });
   };
 
-  const offered = linked.filter((c) => !chosen.includes(accountIdOf(c.value) ?? ""));
+  const offered = linked.filter((c) => !ids.includes(accountIdOf(c.value) ?? ""));
 
   return (
     <div className="jira-people-picker">
       {chosen.length > 0 && (
         <div className="jira-chosen">
-          {chosen.map((id) => (
-            <span key={id} className="pill" title={id}>
-              {nameOf(id)}{" "}
+          {chosen.map((c) => (
+            <span
+              key={keyOf(c)}
+              className={`pill${"typed" in c ? " jira-chip-unlinked" : ""}`}
+              title={"accountId" in c ? c.accountId : "No linked Jira account: the push looks this name up in People"}
+            >
+              {labelOf(c)}{" "}
               <button
                 type="button"
                 className="jira-chip-remove"
-                aria-label={`Remove ${nameOf(id)}`}
-                onClick={() => set(chosen.filter((c) => c !== id))}
+                aria-label={`Remove ${labelOf(c)}`}
+                onClick={() => set(chosen.filter((other) => keyOf(other) !== keyOf(c)))}
               >
                 ✕
               </button>

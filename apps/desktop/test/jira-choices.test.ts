@@ -6,6 +6,8 @@ import {
   cascadingIndexes,
   cascadingValue,
   choicesFor,
+  chosenPeople,
+  storedPeople,
   listText,
   localDatetime,
   parseList,
@@ -67,7 +69,7 @@ test("linked people are offered once per account, by their Jira name, sorted", (
     { value: { accountId: "acc-dan" }, label: "Dan Okafor" },
   ]);
   assert.equal(accountIdOf({ accountId: "acc-dan" }), "acc-dan");
-  assert.equal(accountIdOf(" acc-typed "), "acc-typed");
+  assert.equal(accountIdOf("Dan Okafor"), undefined, "a typed string is not an account");
   assert.equal(accountIdOf(null), undefined);
 });
 
@@ -128,4 +130,22 @@ test("Jira's field errors are named as Jira shows the field, in the message too"
   assert.equal(named.message, "Jira refused it. Team: Team is required. customfield_99: Unknown.");
   assert.equal(named.localKey, "ACME-2");
   assert.equal(namedFieldErrors(failure, meta, undefined), failure, "no issue type, nothing to name it by");
+});
+
+test("a hand-written name resolves through People, and an unknown one stays text rather than a fake account", () => {
+  const people = { "Dan Okafor": { accountId: "acc-dan", displayName: "Dan Okafor" } };
+  const real = "5b10a2844c20165700ede21f";
+  assert.deepEqual(chosenPeople(["dan okafor"], people), [{ accountId: "acc-dan" }]);
+  assert.deepEqual(chosenPeople("Dan Okafor, Renee", people), [{ accountId: "acc-dan" }, { typed: "Renee" }]);
+  assert.deepEqual(chosenPeople([{ accountId: "acc-x" }, real, "557058:00000000-0000-0000-0000-000000000000"], people), [
+    { accountId: "acc-x" },
+    { accountId: real },
+    { accountId: "557058:00000000-0000-0000-0000-000000000000" },
+  ]);
+  assert.deepEqual(chosenPeople(null, people), []);
+
+  // Adding a second person keeps the unresolved name as text, so the push can
+  // still look it up or block on it, instead of sending { accountId: "Renee" }.
+  const next = [...chosenPeople("Renee", people), { accountId: "acc-priya" }];
+  assert.deepEqual(storedPeople(next), ["Renee", { accountId: "acc-priya" }]);
 });

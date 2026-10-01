@@ -4527,6 +4527,12 @@ and an `ask` field in the push pane. Each control stores what a person means:
 - a user or users field is a picker. The map's linked people come first, and
   anyone else is found through a new `jira:search-users` IPC over the core's
   `searchUsers`, the site-wide search. It stores `{ accountId }`
+  - A name written by hand in the map is resolved through People the way
+    `shapeUser` resolves it. One that names nobody linked stays text, shown
+    as a dashed chip, and is never wrapped as `{ accountId: "Renee" }`,
+    which Jira would refuse. That keeps the push's lookup and its blocker in
+    play. A comma string reads as several people. OverSeer's review found
+    this.
 - labels, string lists and groups are a comma input
 - sprint is a number input explaining where the id is found, and team is a
   text input for the team's id
@@ -4565,9 +4571,9 @@ sent* with Remove and no send-mode select.
 `main/jira-push.ts`'s private `adfText` is gone in favour of the core's
 `adfToMarkdown`.
 
-**Tests.** 7 unit tests in `test/jira-choices.test.ts` cover the choice
+**Tests.** 8 unit tests in `test/jira-choices.test.ts` cover the choice
 helpers (cascading lookup by id and by label, people choices, comma lists, the
-datetime reading) and the error naming. The fake ENG now has, on Story, a
+datetime reading, hand-written names in a people field) and the error naming. The fake ENG now has, on Story, a
 textarea *Proposed Solution at Onset*, a cascading *Region*, a *Reviewer*
 user field, and *Rank*. It serves the site-wide `user/search`, with an app
 account mixed in that must not be offered. Its `POST /issue` refuses non-ADF

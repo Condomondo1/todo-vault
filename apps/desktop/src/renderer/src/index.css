@@ -2930,6 +2930,11 @@ kbd.pill {
   gap: 6px;
 }
 
+/* A hand-written name that matches no linked person: still sent as text, so the push can say so. */
+.jira-chip-unlinked {
+  border-style: dashed;
+}
+
 .jira-chip-remove {
   border: 0;
   background: none;
