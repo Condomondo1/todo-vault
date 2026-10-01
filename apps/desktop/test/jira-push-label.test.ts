@@ -30,17 +30,22 @@ const view = (localKey: string, changes: JiraUpdateView["changes"]): JiraUpdateV
   changes,
 });
 
-test("every editable change goes unless unticked, and a locked one never does", () => {
+test("every editable change goes unless unticked, a locked one never does, and all shown are seen", () => {
   const updates = [
     view("ACME-1", [change("summary"), change("duedate"), change("parent", false)]),
     view("ACME-2", [change("summary")]),
     view("ACME-3", []),
+    view("ACME-4", [change("parent", false)]),
   ];
   assert.deepEqual(updateFieldChoices(updates, { "ACME-1": ["duedate"], "ACME-2": ["summary"] }), {
-    "ACME-1": ["summary"],
-    // Listed with nothing ticked: Jira's values are kept, and the item restamped.
-    "ACME-2": [],
+    // The unticked due date and the locked parent were shown, so they are seen.
+    "ACME-1": { ticked: ["summary"], seen: ["summary", "duedate", "parent"] },
+    // ACME-2 has nothing ticked: left for a later push, not sent and not stamped.
     // ACME-3 already matches Jira, which takes "Mark as in sync", not the button.
+    // ACME-4 has nothing it could send.
   });
-  assert.deepEqual(updateFieldChoices(updates, {}), { "ACME-1": ["summary", "duedate"], "ACME-2": ["summary"] });
+  assert.deepEqual(updateFieldChoices(updates, {}), {
+    "ACME-1": { ticked: ["summary", "duedate"], seen: ["summary", "duedate", "parent"] },
+    "ACME-2": { ticked: ["summary"], seen: ["summary"] },
+  });
 });

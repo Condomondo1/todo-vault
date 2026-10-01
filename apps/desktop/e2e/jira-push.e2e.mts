@@ -279,6 +279,63 @@ describe(
       await pane().waitFor({ state: "hidden" });
     });
 
+    test("a field changed in Jira after the pane was read is not buried by a stamp, and is offered next time", async () => {
+      const vault = await Vault.open(harness.vaultRoot);
+      const item = await vault.createItem({ project: "ACME", type: "story", summary: "Book the venue", dueDate: "2026-11-20" });
+      await itemRow(harness.page, item.key).waitFor({ state: "visible" });
+      await itemRow(harness.page, item.key).locator('input[type="checkbox"]').check();
+      await harness.page.locator(".bulk-bar").getByRole("button", { name: "Push to Jira…" }).click();
+      const create = pane().getByRole("button", { name: "Create 1 issue in ENG" });
+      await eventually("the plan has no blockers", () => create.isEnabled(), (on) => on);
+      await create.click();
+      await pane().getByText("Created 1").waitFor();
+      await pane().getByRole("button", { name: "Done" }).click();
+      await pane().waitFor({ state: "hidden" });
+      const issue = project.created.at(-1)!;
+
+      await (await Vault.open(harness.vaultRoot)).updateItem(item.key, { summary: "Book the bigger venue" });
+      await eventually(
+        "the change is on screen",
+        () => itemRow(harness.page, item.key).innerText(),
+        (text) => text.includes("Book the bigger venue"),
+      );
+
+      await harness.page.locator(".bulk-bar").getByRole("button", { name: "Push to Jira…" }).click();
+      const changed = pane().getByRole("region", { name: "Changed since pushed" }).locator(`[data-local-key="${item.key}"]`);
+      await changed.locator('tr[data-field-id="summary"]').waitFor();
+      assert.equal(await changed.locator('tr[data-field-id="duedate"]').count(), 0, "the dates agree when the pane is read");
+
+      // Someone moves the date in Jira while the pane is open.
+      issue.fields.duedate = "2026-12-24";
+      const puts = project.updated.length;
+      await pane().getByRole("button", { name: "Update 1 issue in ENG" }).click();
+      await pane().getByText("Updated 1").waitFor();
+      assert.deepEqual(project.updated.at(-1)?.fields, { summary: "Book the bigger venue" }, "the ticked field still goes");
+      assert.equal(project.updated.length, puts + 1);
+      await pane()
+        .getByText(`${issue.key}: Due date changed in Jira since you looked, so ${item.key} still reads as changed.`, { exact: false })
+        .waitFor();
+      await pane().getByRole("button", { name: "Done" }).click();
+      await pane().waitFor({ state: "hidden" });
+
+      // Not stamped, so the next look offers the difference nobody decided about.
+      await harness.page.locator(".bulk-bar").getByRole("button", { name: "Push to Jira…" }).click();
+      const again = pane().getByRole("region", { name: "Changed since pushed" }).locator(`[data-local-key="${item.key}"]`);
+      const due = again.locator('tr[data-field-id="duedate"]');
+      await due.waitFor();
+      assert.match(await due.innerText(), /2026-12-24\s*→\s*2026-11-20/);
+      assert.equal(await again.locator('tr[data-field-id="summary"]').count(), 0, "the summary went through");
+
+      // Unticking the only field holds the item back: nothing to press, and nothing stamped.
+      await due.getByRole("checkbox").uncheck();
+      await again.getByText("Nothing ticked: left for a later push.").waitFor();
+      assert.equal(await pane().getByRole("button", { name: /^Update/ }).count(), 0);
+      await pane().getByRole("button", { name: "Cancel" }).click();
+      await pane().waitFor({ state: "hidden" });
+      // Still changed by design, so out of the selection the next case pushes.
+      await itemRow(harness.page, item.key).locator('input[type="checkbox"]').uncheck();
+    });
+
     test("an item Jira already matches is only marked as in sync, and a deleted issue is said, not sent", async () => {
       const vault = await Vault.open(harness.vaultRoot);
       const same = await vault.createItem({ project: "ACME", type: "story", summary: "Chase the refund" });

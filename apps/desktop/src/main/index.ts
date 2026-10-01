@@ -24,6 +24,7 @@ import {
   type JiraMappingChoice,
   type JiraPerson,
   type JiraStatus,
+  type JiraUpdateChoice,
   type MaybeSnapshot,
   type Result,
   type ThemePreference,
@@ -585,7 +586,7 @@ function registerHandlers(): void {
     previewPush(service, keys, askValues ?? {}),
   );
 
-  handle(CHANNELS.jiraPush, (keys: string[], askValues: Record<string, unknown>, updateFields: Record<string, string[]>) =>
+  handle(CHANNELS.jiraPush, (keys: string[], askValues: Record<string, unknown>, updateFields: Record<string, JiraUpdateChoice>) =>
     runPush(service, keys, askValues ?? {}, updateFields ?? {}, (progress) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send(CHANNELS.jiraPushProgress, progress);

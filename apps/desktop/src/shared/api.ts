@@ -308,6 +308,13 @@ export interface JiraFieldChangeView {
   reason?: string;
 }
 
+/** What the pane decided for one changed item: the fields to send, and every field it showed. */
+export interface JiraUpdateChoice {
+  ticked: string[];
+  /** Ticked or not. A difference outside this set appeared after the person looked. */
+  seen: string[];
+}
+
 /** An item changed since its push, set beside its Jira issue as it is now. */
 export interface JiraUpdateView {
   localKey: string;
@@ -358,8 +365,20 @@ export type JiraPushProgress =
 
 export interface JiraPushOutcome {
   created: Array<{ localKey: string; jiraKey: string; jiraId: string; url: string }>;
-  /** `fields` names what was sent; empty when the item was only marked as matching Jira. */
-  updated: Array<{ localKey: string; jiraKey: string; url: string; fields: string[] }>;
+  /**
+   * `fields` names what was sent; empty when the item was only marked as
+   * matching Jira. `restamped` is false when a difference the person never
+   * saw or could not send remains, and `note` then says which, so the item
+   * still reads as changed and is offered again.
+   */
+  updated: Array<{
+    localKey: string;
+    jiraKey: string;
+    url: string;
+    fields: string[];
+    restamped: boolean;
+    note?: string;
+  }>;
   /** `fieldErrors` is keyed by Jira's name for the field where the project told us, else its id. */
   failed: Array<{ localKey: string; message: string; fieldErrors: Record<string, string>; uncertain: boolean }>;
   skipped: Array<{ localKey: string; reason: string }>;
@@ -617,11 +636,12 @@ export interface VaultApi {
     keys: string[],
     askValues: Record<string, unknown>,
     /**
-     * Per changed item, the field ids ticked for update. An item listed with
-     * none keeps Jira's values and is restamped; an item not listed is left
-     * alone. Values are never sent from here: main takes them from a fresh diff.
+     * Per changed item to update, the field ids ticked and the ids shown. An
+     * item not listed is left for a later push. Values are never sent from
+     * here: main takes them from a fresh diff, and stamps the item only if
+     * that diff holds nothing beyond what was shown.
      */
-    updateFields: Record<string, string[]>,
+    updateFields: Record<string, JiraUpdateChoice>,
   ): Promise<Result<JiraPushOutcome>>;
   /**
    * Restamp a changed item whose Jira issue already matches it, after reading

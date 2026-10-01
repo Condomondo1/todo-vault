@@ -4774,9 +4774,24 @@ The push sends `updateFields`, the ticked field ids per item. Main then:
 - drops a ticked field that no longer differs without a word
 - skips, with its reason, a ticked field that has become uneditable
 
-An item listed with nothing ticked keeps Jira's values and is restamped, as the
-core intends, so the same fields aren't offered at every push.
-`updateFieldChoices` (`shared/jira-push-label.ts`) builds that list.
+**Stamped only for what was seen.** OverSeer's review found this. The fresh
+diff at push time can hold a difference nobody saw: someone edits the issue in
+Jira while the pane is open, or a ticked field stops being editable. The pane
+therefore sends, per item, the ids it showed (`seen`) beside those ticked. When
+the fresh diff has a change outside `seen`, or a ticked field Jira will no
+longer take, main sets `restamp: false` (#78). The ticked fields still go, but
+the item keeps reading as changed. The outcome says which, for example *ENG-7:
+Due date changed in Jira since you looked, so ACME-3 still reads as changed*,
+and the next look offers that row.
+
+**Nothing ticked means "not now".** Unticking every field is the only way to
+hold one item back from a push. Such an item is left out of the push: not sent,
+not stamped, and not counted in the button. Its block says *Nothing ticked:
+left for a later push*. With some fields ticked, the unticked ones keep Jira's
+values and the item is restamped, since that is a decision per field. Every
+changed item the push doesn't update is listed once as *not updated this time*.
+`updateFieldChoices` (`shared/jira-push-label.ts`) builds the `{ ticked, seen }`
+per item.
 
 **Mark as in sync** is its own IPC, `jira:mark-in-sync`. It reads Jira again,
 restamps only if the diff is still empty, and sends nothing to Jira. If the
@@ -4800,12 +4815,18 @@ lookup instead of a project and issue type.
 `updated` records exactly what each PUT carried.
 
 **Tests.** 3 unit tests, in `jira-push-label.test.ts` and the updated naming
-test. Two e2e cases:
+test. Three e2e cases:
 - **Update:** push a story, then change its summary and clear its due date in
   the vault. The pane shows exactly those two rows, ticked; the item isn't
   under *not sent*. Unticking the due date and pressing *Update 1 issue in ENG*
   sends one PUT carrying only `summary`. Jira keeps its due date, the item
   reads pushed, and a third look offers nothing.
+- **A change in Jira after the pane was read:** the pane shows only the
+  summary. The fake then moves the due date before *Update* is pressed. The
+  PUT carries only `summary`, the outcome names the due date, and the item
+  isn't stamped. The next look offers *Due date* (Jira's new date → the
+  vault's), and unticking it leaves the item for a later push, with no button
+  to press.
 - **Mark as in sync, and a deleted issue:** one issue edited the same way on
   both sides, and another deleted in Jira (its GET answers 404). The pane
   offers *Mark as in sync* for the first, which stamps it with no PUT, and
@@ -4813,4 +4834,5 @@ test. Two e2e cases:
 
 A screenshot of the pane was checked by eye. **Not verified:** a refused PUT's
 named field errors through the app, and the "became uneditable between preview
-and push" path, which needs Jira to change mid-push.
+and push" path. The unseen-change path is driven, but the fake's edit screen
+never changes.

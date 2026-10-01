@@ -95,7 +95,7 @@ export function JiraPush({
       setProgress((cur) => ({ ...cur, [p.localKey]: p }));
     });
     try {
-      const result = await window.vault.jiraPush(keys, askValues, updateFieldChoices(updates, unticked));
+      const result = await window.vault.jiraPush(keys, askValues, updateChoices);
       if (result.ok) setOutcome(result.value);
       else setError(result.message);
     } finally {
@@ -122,8 +122,13 @@ export function JiraPush({
   const drafts = preview?.drafts ?? [];
   const blockers = preview?.blockers ?? [];
   const updates = preview?.updates ?? [];
-  /** Changed items the button acts on. One that already matches Jira waits for "Mark as in sync". */
-  const toUpdate = updates.filter((u) => u.changes.length > 0).length;
+  /**
+   * Changed items the button acts on: those with a field ticked. One with
+   * nothing ticked is left for later, and one that already matches Jira waits
+   * for "Mark as in sync".
+   */
+  const updateChoices = updateFieldChoices(updates, unticked);
+  const toUpdate = Object.keys(updateChoices).length;
   const canPush =
     !loading && !pushing && !outcome && drafts.length + toUpdate > 0 && blockers.length === 0;
   const projectLabel = preview ? preview.projectKey : "Jira";
@@ -435,6 +440,10 @@ function UpdateRow({
             </tbody>
           </table>
         )}
+        {update.changes.length > 0 &&
+          !update.changes.some((c) => c.editable && !unticked.includes(c.fieldId)) && (
+            <p className="field-note">Nothing ticked: left for a later push.</p>
+          )}
       </div>
     </li>
   );
@@ -562,6 +571,7 @@ function Outcome({ outcome }: { outcome: JiraPushOutcome }): React.JSX.Element {
                 <span className="field-note">
                   {u.fields.length ? u.fields.join(", ") : "nothing sent; Jira's values kept"}
                 </span>
+                {u.note && <div className="field-note due-overdue">{u.note}</div>}
               </li>
             ))}
           </ul>

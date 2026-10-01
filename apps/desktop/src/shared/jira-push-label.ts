@@ -5,7 +5,7 @@
  * say exactly what the press does, because it writes into a tracker other
  * people read.
  */
-import type { JiraUpdateView } from "./api.js";
+import type { JiraUpdateChoice, JiraUpdateView } from "./api.js";
 
 /**
  * "Create 2 issues in ENG", "Update 1 issue in ENG", or "Create 2 and update 1
@@ -20,22 +20,27 @@ export function pushButtonLabel(creates: number, updates: number, projectKey: st
 }
 
 /**
- * The field ids to send per changed item: every editable change not unticked.
+ * What to send per changed item: the editable changes still ticked, and every
+ * change the pane showed, so main can tell a difference the person saw from
+ * one that appeared after they looked.
  *
- * An item with changes is always listed, even with nothing ticked. Leaving
- * every field as Jira has it is a decision about each one, and the restamp
- * that follows stops the same fields being offered at every push. An item
- * whose issue already matches is not listed: that takes "Mark as in sync".
+ * An item with nothing ticked is left out. Unticking every field is how one
+ * item is held back from a push, so it means "not now", and the item keeps
+ * reading as changed. Some ticked is a decision per field: the unticked ones
+ * keep Jira's values, and the restamp stops them being offered again. An item
+ * whose issue already matches is not listed either: that takes "Mark as in
+ * sync".
  */
 export function updateFieldChoices(
   updates: readonly JiraUpdateView[],
   unticked: Readonly<Record<string, readonly string[]>>,
-): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
+): Record<string, JiraUpdateChoice> {
+  const out: Record<string, JiraUpdateChoice> = {};
   for (const update of updates) {
-    if (update.changes.length === 0) continue;
     const off = new Set(unticked[update.localKey] ?? []);
-    out[update.localKey] = update.changes.filter((c) => c.editable && !off.has(c.fieldId)).map((c) => c.fieldId);
+    const ticked = update.changes.filter((c) => c.editable && !off.has(c.fieldId)).map((c) => c.fieldId);
+    if (ticked.length === 0) continue;
+    out[update.localKey] = { ticked, seen: update.changes.map((c) => c.fieldId) };
   }
   return out;
 }

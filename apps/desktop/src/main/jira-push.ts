@@ -54,6 +54,7 @@ import type {
   JiraPushOutcome,
   JiraPushPreview,
   JiraPushProgress,
+  JiraUpdateChoice,
   JiraUpdateView,
 } from "../shared/api.js";
 import { choicesFor } from "../shared/jira-choices.js";
@@ -359,7 +360,7 @@ export async function runPush(
   service: VaultService,
   keys: string[],
   askValues: Record<string, unknown>,
-  updateFields: Record<string, string[]>,
+  updateFields: Record<string, JiraUpdateChoice>,
   onProgress: (progress: JiraPushProgress) => void,
 ): Promise<JiraPushOutcome> {
   // A double click must not become two pushes of the same items.
@@ -381,6 +382,11 @@ export async function runPush(
       onProgress,
     });
     const typeOf = new Map(plan.drafts.map((d) => [d.localKey, d.issueType]));
+    // The create path skips every changed item, with a reason about updating.
+    // Each is reported once, below: by its update, or as held back.
+    const changedKeys = await service.read(
+      (vault) => new Set(buildUpdatePlan(keys.map((k) => vault.getItem(k)), ctx.map, vault).updates.map((u) => u.localKey)),
+    );
     const result: JiraPushOutcome = {
       ...outcome,
       updated: [],
@@ -388,8 +394,15 @@ export async function runPush(
         const type = typeOf.get(f.localKey);
         return namedFieldErrors(f, type ? (id) => fieldName(ctx.meta, type, id) : undefined);
       }),
-      // The create path skips a changed item. The update below reports it.
-      skipped: outcome.skipped.filter((s) => !(s.localKey in updateFields)),
+      skipped: [
+        ...outcome.skipped.filter((s) => !changedKeys.has(s.localKey)),
+        ...[...changedKeys]
+          .filter((key) => !(key in updateFields))
+          .map((localKey) => ({
+            localKey,
+            reason: "Changed since its push and not updated this time. It is offered again at the next push.",
+          })),
+      ],
     };
     if (Object.keys(updateFields).length > 0) {
       await pushUpdates(service, ctx, updateFields, onProgress, result);
@@ -405,14 +418,20 @@ export async function runPush(
  * by the time its child's parent field is compared.
  *
  * Jira is read again and every value comes from that fresh diff. The renderer
- * only says which fields were ticked. A ticked field that no longer differs is
- * dropped without a word, since the issue already says what the person chose.
- * One that has become uneditable is not sent, and the outcome says so.
+ * only says which fields were ticked and which it showed. A ticked field that
+ * no longer differs is dropped without a word, since the issue already says
+ * what the person chose. One that has become uneditable is not sent.
+ *
+ * The item is stamped as matching Jira only when every remaining difference
+ * is one the person saw and decided about. A difference that appeared after
+ * they looked, or a ticked field Jira will no longer take, leaves it unstamped
+ * (`restamp: false`): the ticked fields still go, the item still reads as
+ * changed, and the next push offers what is left.
  */
 async function pushUpdates(
   service: VaultService,
   ctx: PushContext,
-  updateFields: Record<string, string[]>,
+  updateFields: Record<string, JiraUpdateChoice>,
   onProgress: (progress: JiraPushProgress) => void,
   result: JiraPushOutcome,
 ): Promise<void> {
@@ -421,18 +440,29 @@ async function pushUpdates(
 
   const names = new Map<string, Map<string, string>>();
   const editScreens = new Map<string, IssueState["editable"]>();
+  const notes = new Map<string, string>();
   const choices = changed.read.map(({ update, state, diff }) => {
-    const ticked = new Set(updateFields[update.localKey] ?? []);
+    const choice = updateFields[update.localKey];
+    const ticked = new Set(choice?.ticked ?? []);
+    const seen = new Set(choice?.seen ?? []);
     const fields: Record<string, unknown> = {};
+    const unseen: string[] = [];
+    const locked: string[] = [];
     for (const change of diff.changes) {
+      if (!seen.has(change.fieldId)) unseen.push(change.name);
       if (!ticked.has(change.fieldId)) continue;
       if (change.editable) fields[change.fieldId] = change.value;
-      else {
-        result.skipped.push({
-          localKey: update.localKey,
-          reason: `${change.name} was not changed. ${change.reason ?? ""}`.trim(),
-        });
-      }
+      else locked.push(`${change.name}: ${change.reason ?? "Jira will not take it."}`);
+    }
+    const reasons = [
+      ...(unseen.length ? [`${unseen.join(", ")} changed in Jira since you looked`] : []),
+      ...(locked.length ? [`Jira would not take ${locked.join("; ")}`] : []),
+    ];
+    if (reasons.length) {
+      notes.set(
+        update.localKey,
+        `${update.jiraKey}: ${reasons.join(", and ")}, so ${update.localKey} still reads as changed. Open the pane again to review it.`,
+      );
     }
     names.set(update.localKey, new Map(diff.changes.map((c) => [c.fieldId, c.name])));
     editScreens.set(update.localKey, state.editable);
@@ -441,6 +471,7 @@ async function pushUpdates(
       jiraKey: update.jiraKey,
       ...(update.jiraId ? { jiraId: update.jiraId } : {}),
       fields,
+      restamp: reasons.length === 0,
     };
   });
 
@@ -453,7 +484,8 @@ async function pushUpdates(
 
   for (const u of outcome.updated) {
     const named = names.get(u.localKey);
-    result.updated.push({ ...u, fields: u.fields.map((id) => named?.get(id) ?? id) });
+    const note = notes.get(u.localKey);
+    result.updated.push({ ...u, fields: u.fields.map((id) => named?.get(id) ?? id), ...(note ? { note } : {}) });
   }
   for (const f of outcome.failed) {
     // Named from the edit screen the PUT went to, not the create screen.
