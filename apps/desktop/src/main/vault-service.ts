@@ -230,6 +230,7 @@ export class VaultService extends EventEmitter {
     const { items } = vault.listItems({ limit: 500 });
     const trash = await vault.listTrash();
     const scratch = await vault.listScratch();
+    const trashedNotes = await vault.listTrashedScratch();
 
     return {
       root: vault.root,
@@ -240,7 +241,8 @@ export class VaultService extends EventEmitter {
       errors: [...errors, ...scratch.errors],
       scratch: scratch.notes,
       git: await vault.gitStatus(),
-      trashCount: trash.length,
+      // Notes count too: the sidebar's Trash button is one promise about everything that left.
+      trashCount: trash.length + trashedNotes.length,
       loadedAt: new Date().toISOString(),
     };
   }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { TrashEntry } from "todo-vault";
+import type { ScratchTrashEntry, TrashEntry } from "todo-vault";
 
 /**
  * What is recoverable.
@@ -11,11 +11,15 @@ import type { TrashEntry } from "todo-vault";
 export function TrashPanel({
   onClose,
   onRestore,
+  onRestoreNote,
 }: {
   onClose: () => void;
   onRestore: (file: string) => Promise<void>;
+  /** Puts a trashed scratch note back, by the filename listTrashedScratch reported. */
+  onRestoreNote: (file: string) => Promise<void>;
 }): React.JSX.Element {
   const [entries, setEntries] = useState<TrashEntry[] | null>(null);
+  const [notes, setNotes] = useState<ScratchTrashEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const load = (): void => {
@@ -26,6 +30,10 @@ export function TrashPanel({
       } else {
         setError(result.message);
       }
+    });
+    void window.vault.listTrashedScratch().then((result) => {
+      if (result.ok) setNotes(result.value);
+      else setError(result.message);
     });
   };
 
@@ -46,7 +54,7 @@ export function TrashPanel({
           {error && <div className="modal-error">{error}</div>}
           {!entries && <div className="field-note">Reading .trash…</div>}
 
-          {entries && entries.length === 0 && (
+          {entries && entries.length === 0 && notes.length === 0 && (
             <div className="field-note">
               Nothing in the trash. Deleted items land here rather than being unlinked, so they
               can be brought back without relying on git.
@@ -72,6 +80,24 @@ export function TrashPanel({
                 </div>
               ))}
             </div>
+          )}
+
+          {notes.length > 0 && (
+            <>
+              <h3 className="trash-group">Scratch</h3>
+              <div className="rows">
+                {notes.map((entry) => (
+                  <div className="row" key={entry.file}>
+                    <span className="cell-key">note</span>
+                    <span className="row-summary">{entry.preview ?? "(unreadable)"}</span>
+                    <span className="section-range">{entry.trashedAt.slice(0, 10)}</span>
+                    <button className="btn" onClick={() => void onRestoreNote(entry.file).then(load)}>
+                      Restore
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
 
           <p className="field-note" style={{ marginTop: 14 }}>

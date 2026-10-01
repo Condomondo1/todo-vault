@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // The constants subpath, not the package root — see the note at the top of
 // pieces.tsx: the root pulls vault.js, and node:fs with it, into the bundle.
 import { ITEM_TYPES, type ItemType } from "todo-vault/constants";
-import type { Item, Status } from "todo-vault";
+import type { Item, ScratchNote, Status } from "todo-vault";
 import type { AgendaScope, ProjectSummary, ThemePreference } from "@shared/api";
 
 import { useVault } from "./useVault";
@@ -19,6 +19,10 @@ import { ProjectDialog } from "./ProjectDialog";
 import { TrashPanel } from "./TrashPanel";
 import { HiddenPanel } from "./HiddenPanel";
 import { CommandPalette } from "./CommandPalette";
+import { ScratchPage } from "./ScratchPage";
+import { ScratchSection } from "./ScratchSection";
+import { selectionAfterRemove, stepNote } from "./scratch";
+import { APP_NAME } from "@shared/app-name";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { ClaudeSettings } from "./ClaudeSettings";
 import { JiraSettings } from "./JiraSettings";
@@ -39,7 +43,7 @@ import {
   type OutsideTarget,
 } from "./outside-click";
 
-type View = "backlog" | "board" | "agenda" | "calendar" | "history";
+type View = "backlog" | "board" | "agenda" | "calendar" | "history" | "scratch";
 
 /** What a new-item form should open pointed at. Empty from the toolbar. */
 type NewItemDefaults = { project?: string; type?: ItemType; parent?: string };
@@ -170,6 +174,17 @@ export function App(): React.JSX.Element {
 
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  // The scratch pad. The notes themselves ride on the snapshot; this is only the
+  // window's own state about them.
+  const [scratchSel, setScratchSel] = useState<string | null>(null);
+  const [scratchAdding, setScratchAdding] = useState(false);
+  // A fresh number asks the Scratch page's capture box for focus. Null leaves it
+  // alone, which is what opening a particular note wants.
+  const [captureFocus, setCaptureFocus] = useState<number | null>(null);
+  const [version, setVersion] = useState<string | null>(null);
+  // A passing message with at most one action, for what is not an Undo: "Added
+  // to scratch · Open". The undo toast, when there is one, takes the slot first.
+  const [notice, setNotice] = useState<{ message: string; action?: { label: string; run: () => void } } | null>(null);
   const [claudeOpen, setClaudeOpen] = useState(false);
   /** The keys the push pane is open for, or null when it is closed. */
   const [jiraPushKeys, setJiraPushKeys] = useState<string[] | null>(null);
@@ -207,6 +222,28 @@ export function App(): React.JSX.Element {
 
   /** Whether the bulk edit bar is showing — backlog only, and only with a selection. */
   const bulkBarOpen = view === "backlog" && checked.size > 0;
+
+  // Once, for the title row. A failure leaves the version off the row, which is
+  // all it is: faint text beside a name.
+  useEffect(() => {
+    void window.vault.getVersion().then((result) => {
+      if (result.ok) setVersion(result.value);
+    });
+  }, []);
+
+  const scratch = useMemo<ScratchNote[]>(() => snapshot?.scratch ?? [], [snapshot]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 4500);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  // A selected note that is gone — removed here, or by Claude over MCP — must not
+  // leave `x` pointing at nothing. Derived rather than pruned in an effect: an
+  // effect would clear the selection the moment the snapshot lost the note, ahead
+  // of removeNote moving it to the neighbour.
+  const scratchSelected = scratch.some((note) => note.id === scratchSel) ? scratchSel : null;
 
   /**
    * The hiding split, computed once.
@@ -457,7 +494,66 @@ export function App(): React.JSX.Element {
   const open = useCallback((key: string) => {
     setSelected(key);
     setDetailKey(key);
+    // Opening an item from Scratch (Ctrl-K, a search result) goes to Backlog:
+    // the item's panel and the page do not share the window's right-hand slot.
+    setView((current) => (current === "scratch" ? "backlog" : current));
   }, []);
+
+  /**
+   * Go to the Scratch page. With a note, that note is selected and the capture
+   * box is left alone; without one the box takes focus. An item selection from
+   * the view being left is dropped, or `x` and Enter would act on an item that
+   * is no longer on screen.
+   */
+  const showScratch = useCallback((noteId?: string) => {
+    setView("scratch");
+    setDetailKey(null);
+    setSelected(null);
+    if (noteId !== undefined) {
+      setScratchSel(noteId);
+      setCaptureFocus(null);
+    } else {
+      setCaptureFocus((n) => (n ?? 0) + 1);
+    }
+  }, []);
+
+  /** Ask the Scratch page's box for focus, from wherever the request came. */
+  const focusCapture = useCallback(() => setCaptureFocus((n) => (n ?? 0) + 1), []);
+
+  /** A project row is a filter, so choosing one leaves the Scratch page for Backlog. */
+  const chooseProject = useCallback((key: string | null) => {
+    setProject(key);
+    setView((current) => (current === "scratch" ? "backlog" : current));
+  }, []);
+
+  /** Add a note from the sidebar's box. Off the page, say so and offer to open it. */
+  const addNoteFromSidebar = useCallback(
+    async (text: string): Promise<string | null> => {
+      const { error, note } = await vault.addScratch(text);
+      if (error || !note) return error;
+      if (view !== "scratch") {
+        setNotice({ message: "Added to scratch", action: { label: "Open", run: () => showScratch(note.id) } });
+      }
+      return null;
+    },
+    [vault, view, showScratch],
+  );
+
+  /** Add a note from the page's own box. The note is already on screen, so no toast. */
+  const addNoteFromPage = useCallback(
+    async (text: string): Promise<string | null> => (await vault.addScratch(text)).error,
+    [vault],
+  );
+
+  /** Remove a note and move the selection to its neighbour, as `x` does in the backlog. */
+  const removeNote = useCallback(
+    async (id: string) => {
+      const next = selectionAfterRemove(scratch, id);
+      const error = await vault.removeScratch(id);
+      if (!error) setScratchSel((current) => (current === id ? next : current));
+    },
+    [scratch, vault],
+  );
 
   /**
    * Toggle one row, or extend from the anchor — Ctrl/Cmd+click and shift-click
@@ -684,6 +780,12 @@ export function App(): React.JSX.Element {
           (event.target as HTMLElement).blur();
           return;
         }
+        // On the Scratch page the note selection is the only thing Escape has to
+        // let go of; the item selection and its panel are not on screen.
+        if (view === "scratch") {
+          if (scratchSelected) setScratchSel(null);
+          return;
+        }
         // First rung: drop the bulk selection, the same way a Finder or Gmail
         // Escape does before it touches anything else. Otherwise clearing a
         // twelve-item selection takes as many Escapes as the panel does.
@@ -697,6 +799,59 @@ export function App(): React.JSX.Element {
       }
 
       if (typing || !plain || overlaid) return;
+
+      // Shift+N jots a note from any view: the sidebar's box, or on the Scratch
+      // page its own. A bare key like the others, so the typing guard above
+      // already keeps it out of every text field.
+      if (event.key === "N") {
+        event.preventDefault();
+        if (view === "scratch") focusCapture();
+        else setScratchAdding(true);
+        return;
+      }
+
+      if (view === "scratch") {
+        switch (event.key) {
+          case "j":
+          case "ArrowDown":
+            event.preventDefault();
+            setScratchSel((current) => stepNote(scratch, current, 1));
+            return;
+          case "k":
+          case "ArrowUp":
+            event.preventDefault();
+            setScratchSel((current) => stepNote(scratch, current, -1));
+            return;
+          case "x":
+            if (scratchSelected) void removeNote(scratchSelected);
+            return;
+          case "c":
+            event.preventDefault();
+            focusCapture();
+            return;
+          // Promote is not built yet; until it is, these must still not fall
+          // through to the item shortcuts below, which would act on whatever
+          // item was selected before the page was opened.
+          case "Enter":
+          case "p":
+          // The filter row is hidden here, so "/" would focus an input nobody can see.
+          case "/":
+          case "e":
+          case "h":
+          case "l":
+          case "ArrowLeft":
+          case "ArrowRight":
+          case " ":
+          case "J":
+          case "K":
+          case "g":
+          case "[":
+          case "]":
+            return;
+          default:
+            break;
+        }
+      }
 
       switch (event.key) {
         case "j":
@@ -764,6 +919,9 @@ export function App(): React.JSX.Element {
         case "5":
           setView("history");
           return;
+        case "6":
+          showScratch();
+          return;
         // Gated on the board rather than global: it is the only view with lanes,
         // and a key that silently changes something two views away is worse than
         // one that does nothing.
@@ -824,6 +982,11 @@ export function App(): React.JSX.Element {
     collapseSelected,
     handleDelete,
     vault,
+    scratch,
+    scratchSelected,
+    showScratch,
+    focusCapture,
+    removeNote,
   ]);
 
   /*
@@ -978,6 +1141,28 @@ export function App(): React.JSX.Element {
   return (
     <div className="app">
       <nav className="sidebar">
+        <div className="app-title">
+          <span className="app-name">{APP_NAME}</span>
+          {version && (
+            <span className="app-version" title="Version">
+              v{version}
+            </span>
+          )}
+        </div>
+
+        <ScratchSection
+          notes={scratch}
+          onPage={view === "scratch"}
+          selectedId={scratchSelected}
+          adding={scratchAdding}
+          onAddingChange={setScratchAdding}
+          onAdd={addNoteFromSidebar}
+          onOpenNote={(id) => showScratch(id)}
+          onMore={() => showScratch()}
+          /* On the page the page's own box is the place to type. */
+          onNew={() => (view === "scratch" ? focusCapture() : setScratchAdding((on) => !on))}
+        />
+
         <div className="sidebar-head">
           <span className="sidebar-title">Projects</span>
           {/*
@@ -999,8 +1184,8 @@ export function App(): React.JSX.Element {
         <div className="sidebar-scroll">
           <button
             className="project"
-            aria-current={project === null}
-            onClick={() => setProject(null)}
+            aria-current={view !== "scratch" && project === null}
+            onClick={() => chooseProject(null)}
           >
             <span className="project-name">All projects</span>
             <span className="project-count">
@@ -1039,8 +1224,8 @@ export function App(): React.JSX.Element {
               >
                 <button
                   className="project"
-                  aria-current={project === p.key}
-                  onClick={() => setProject(p.key)}
+                  aria-current={view !== "scratch" && project === p.key}
+                  onClick={() => chooseProject(p.key)}
                   title={`${p.name} — ${p.totalItems} items, ${p.openItems} open${p.rank !== undefined ? `, rank ${p.rank}` : ""}\nDrag to reorder`}
                 >
                   <span className="project-key">{p.key}</span>
@@ -1190,7 +1375,7 @@ export function App(): React.JSX.Element {
               <option value="month">This month</option>
               <option value="next30Days">Next 30 days</option>
             </select>
-          ) : (
+          ) : view === "scratch" ? null : (
             <>
               {/*
                 Calendar-only, and at the head of the row rather than replacing
@@ -1341,13 +1526,16 @@ export function App(): React.JSX.Element {
             whole vault regardless of what is filtered here — the two are
             deliberately different tools, so the placeholder says which this is.
           */}
-          <input
-            ref={searchRef}
-            type="search"
-            placeholder="Filter this view… (/)"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-          />
+          {/* Hidden on Scratch (and "/" does nothing there): the notes are not filtered. */}
+          {view !== "scratch" && (
+            <input
+              ref={searchRef}
+              type="search"
+              placeholder="Filter this view… (/)"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+            />
+          )}
           <button
             className="btn"
             onClick={() => setPaletteOpen(true)}
@@ -1482,6 +1670,17 @@ export function App(): React.JSX.Element {
               }
             />
           )}
+          {view === "scratch" && (
+            <ScratchPage
+              notes={scratch}
+              selectedId={scratchSelected}
+              focusToken={captureFocus}
+              onSelect={setScratchSel}
+              onAdd={addNoteFromPage}
+              onRemove={(id) => void removeNote(id)}
+              onOpenLink={(href) => void window.vault.openTarget({ kind: "external", value: href })}
+            />
+          )}
           {view === "history" && (
             <History
               git={snapshot.git}
@@ -1572,8 +1771,10 @@ export function App(): React.JSX.Element {
                 : []
           }
           onClose={() => setPaletteOpen(false)}
+          notes={scratch}
           onSelectItem={open}
-          onSelectProject={setProject}
+          onSelectNote={(id) => showScratch(id)}
+          onSelectProject={chooseProject}
         />
       )}
 
@@ -1613,6 +1814,9 @@ export function App(): React.JSX.Element {
         <TrashPanel
           onClose={() => setShowTrash(false)}
           onRestore={(file) => vault.restore([file])}
+          onRestoreNote={async (file) => {
+            await vault.restoreScratch(file);
+          }}
         />
       )}
 
@@ -1623,6 +1827,26 @@ export function App(): React.JSX.Element {
           onClose={() => setShowHidden(false)}
           onUnhide={handleUnhideProject}
         />
+      )}
+
+      {!vault.undo && notice && (
+        <div className="toast" role="status">
+          <span style={{ flex: 1 }}>{notice.message}</span>
+          {notice.action && (
+            <button
+              className="btn"
+              onClick={() => {
+                notice.action?.run();
+                setNotice(null);
+              }}
+            >
+              {notice.action.label}
+            </button>
+          )}
+          <button className="banner-close" onClick={() => setNotice(null)} aria-label="Dismiss">
+            ✕
+          </button>
+        </div>
       )}
 
       {vault.undo && (

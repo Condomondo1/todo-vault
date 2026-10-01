@@ -25,9 +25,9 @@ export interface Shortcut {
 // `group` but never sorts, so this array is also the order it renders in.
 export const SHORTCUTS: readonly Shortcut[] = [
   { keys: ["Ctrl", "K"], label: "Search everything", group: "Navigation", whileTyping: true },
-  { keys: ["/"], label: "Focus the filter box", group: "Navigation" },
-  { keys: ["j", "↓"], label: "Next item", group: "Navigation" },
-  { keys: ["k", "↑"], label: "Previous item", group: "Navigation" },
+  { keys: ["/"], label: "Focus the filter box (not on Scratch)", group: "Navigation" },
+  { keys: ["j", "↓"], label: "Next item, or next note (Scratch)", group: "Navigation" },
+  { keys: ["k", "↑"], label: "Previous item, or previous note (Scratch)", group: "Navigation" },
   { keys: ["h", "←"], label: "Collapse the subtree (backlog)", group: "Navigation" },
   { keys: ["l", "→"], label: "Expand the subtree (backlog)", group: "Navigation" },
   { keys: ["Enter"], label: "Open the highlighted item", group: "Navigation" },
@@ -42,6 +42,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { keys: ["3"], label: "Agenda", group: "Views" },
   { keys: ["4"], label: "Calendar", group: "Views" },
   { keys: ["5"], label: "History", group: "Views" },
+  { keys: ["6"], label: "Scratch", group: "Views" },
 
   { keys: ["g"], label: "Group the board by project", group: "Display" },
   { keys: ["["], label: "Previous month (calendar)", group: "Display" },
@@ -57,7 +58,9 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { keys: ["Ctrl", "0"], label: "Back to normal size", group: "Display", whileTyping: true },
 
   { keys: ["n"], label: "New item", group: "Items" },
-  { keys: ["x"], label: "Delete the selected item", group: "Items" },
+  { keys: ["Shift", "N"], label: "Jot a scratch note, from any view", group: "Items" },
+  { keys: ["c"], label: "Focus the capture box (Scratch)", group: "Items" },
+  { keys: ["x"], label: "Delete the selected item, or remove the selected note (Scratch)", group: "Items" },
   { keys: ["e"], label: "Edit the selected item's summary", group: "Items" },
 
   { keys: ["t"], label: "Trash", group: "Vault" },
