@@ -4836,3 +4836,163 @@ A screenshot of the pane was checked by eye. **Not verified:** a refused PUT's
 named field errors through the app, and the "became uneditable between preview
 and push" path. The unseen-change path is driven, but the fake's edit screen
 never changes.
+
+## The scratch pad: dump first, decide later ✅ built and driven (#85–#96)
+
+Ideas, pasted snippets and half-formed to-dos had nowhere to land short of a
+real item, which demands a project, a type and a summary the person does not
+have yet. The scratch pad is a staging area for them: notes go in with nothing
+decided, the keepers are promoted into items one motion at a time, and the rest
+are removed. It was built in nine slices over one day by two sessions,
+OverSeer on the core and the Project Lead on the app, against a plan reviewed
+twice before any code was written. Most of what follows is what those reviews
+changed.
+
+**One file per note, not one list.** The first draft kept the pad in a single
+`scratch.json`. The app and the MCP server are separate processes writing the
+same vault, and a shared list is read-modify-write: Claude adding a note while
+the app removes one would lose one of the two writes. A note is therefore
+`scratch/<id>.md`, with `id` and `created` as frontmatter and the text as the
+body, the answer the vault already gives for items. Every add, remove and
+restore touches exactly one file. A test drives two `Vault` instances over one
+folder with interleaved adds and removes and checks that nothing is lost. JSON
+would also have escaped newlines, turning a pasted SQL query into an unreadable
+one-line diff in history.
+
+**Nothing is cached, and `load()` does not read the folder.** Every MCP tool
+call reloads the vault anyway, and the desktop re-reads on a watcher event, so
+an index would only be one more thing to go stale. `listScratch()` reads the
+folder on each call, newest first, and returns a note that will not parse in
+`errors` rather than throwing, so one hand-edited file cannot hide the rest. A
+file whose `id` disagrees with its filename counts as broken, because removing
+it by the listed id would name a file that does not exist. The schema is
+passthrough rather than strict, unlike items: an MCP server a version behind
+the app is a normal state, and strict would make it drop every note carrying a
+field it has not heard of.
+
+**The text is kept as written.** `serializeFrontmatter` trims the body, which
+would strip the indentation from a pasted YAML or Python snippet's first line,
+so notes are written after the frontmatter rather than through it. Only leading
+blank lines and trailing whitespace go.
+
+**Removing trashes.** Notes go to `.trash/scratch/`, like items, so the Undo
+toast and Claude's remove are both recoverable, the Trash panel lists them, and
+its count includes them. History covers `scratch/` and `.trash/scratch`, with a
+`scratch` subject titled by the note's first line.
+
+**Promote is one commit, and the order is the guarantee.** Building promote on
+`createItem` as it stood would have made two commits, since `createItem`
+committed itself, and an interruption between them would strand a duplicate
+with nothing tying the two together. `createItem` was split into
+`writeNewItem`, which keeps the key-collision retry around the write alone, and
+a thin commit. `promoteScratch(id, input, { keep })` writes the item first,
+trashes the note second, and commits once as `Promote scratch note to <KEY>`. A
+failure between the two steps leaves a duplicate, never a lost note. If the
+note cannot be trashed, the item is still committed and the error begins
+*Created <KEY>, but the note stayed on the scratch pad*. Both the app and
+Claude's tool description treat that message as "the item exists", because a
+caller that read it as "nothing happened" and retried would create the item
+twice.
+
+**Provenance is the commit subject, never the description.** The first draft
+appended *Promoted from scratch* to the item's description. The description is
+what a Jira push sends as the issue body, so that line would have reached every
+ticket, read by people who never saw the pad, and sat in the rich editor as
+text to delete. History keeps the subject; nothing visible changes.
+
+**Claude gets five tools, not three.** With only add, list and remove, "turn my
+scratch notes into tickets" would have Claude call `vault_create_item` and then
+`vault_scratch_remove`: the two-commit strand the core promote exists to
+prevent. `vault_scratch_promote` takes exactly `vault_create_item`'s arguments,
+now one shared object so the two cannot drift, and its description says the
+note's text is not copied for Claude, which writes the summary itself.
+`vault_scratch_restore` is the fifth, because the server's own instructions say
+deletes are recoverable and a remove with no way back would contradict them.
+
+**In the sidebar, under the app's name.** Scratch was planned as a sixth tab,
+then as a single row above Projects. A tab implied the project filter applies,
+as it does on the other five. The single row, at the top of the sidebar, read
+as the app's title and showed nothing of the pad. The sidebar is now the
+**ToDo Vault** title with the version beside it, then a Scratch section built
+like Projects (count, *+ new*, the five newest notes, *More…*), then Projects.
+*+ new* and Shift+N add a note inline from any view without leaving it. The
+notes therefore ride on every snapshot, not just the page's, and the watcher
+covers `scratch/` so a note Claude adds appears without a click.
+
+**The page shares keys with the item views without inheriting them.** `j` and
+`k` move between notes, `x` removes the selected one, `c` returns to the
+capture box, and every other item key is swallowed on Scratch so it cannot act
+on an item selected before the page was opened. The capture box takes focus on
+arrival and never after an add or a remove, because a focused box disables
+every bare key. The selected note is derived from the snapshot rather than
+pruned by an effect; the effect raced the move to the neighbour after `x`. `/`
+does nothing there, and opening an item from Scratch goes to Backlog, since the
+item's panel and the promote panel would want the same side of the window.
+
+**The promote panel reuses the New item form.** `CreateDialog` was a modal that
+owned its fields. They were extracted first, as `ItemFormFields` and
+`useItemForm`, with no change in behaviour and an e2e of the dialog written
+against the old code before the extraction. The panel then fills the form from
+the note:
+- the summary is the first line, cut near a word boundary at 255 characters
+  with the rest moved into the description, never dropped
+- a note that opens with a code fence keeps its whole text as the description,
+  since splitting off a line would unbalance the fence
+- the type is `bug` only on strong words and `task` otherwise, never a story
+  on a guess
+
+After Create the next note is selected and `reseed()` refills type, summary and
+description while project, parent and category stay, so triaging ten notes into
+one epic is ten Ctrl+Enters. Ctrl+Enter works from the description too, through
+a new `onSubmit` on the rich editor, which otherwise keeps that chord to itself.
+Promote never sets `lastCreated`, which would open the new item over the panel;
+the toast's *Open* is the way to it.
+
+**Claude drafts only on request.** The plan once had the panel ask Claude for
+every note it showed. That defeats the batch rhythm, costs money per note, and
+sends a pasted query or token to the API without anyone choosing to. *Draft
+with Claude* is a button, labelled as sending the note, off with a pointer when
+no key is stored, and a reply that arrives after the selection moved is
+dropped. Its e2e answers from a local fake through `ANTHROPIC_BASE_URL`, and
+checks in the main process, before the dummy key is stored and before each
+click, that the app really is pointed at it.
+
+**A pasted list asks once.** Several plain lines pasted into either box offer
+*Add as N notes* or *Keep as 1 note*. A fenced block or wholly indented text is
+one note with no question. Nothing is guessed from punctuation: the mockups'
+test for `;{}()=` would have called prose with brackets code. Blank lines are
+never notes, and past 50 lines no split is offered, since each note is its own
+file and commit. A split that fails part-way shrinks the offer to the lines not
+yet saved, so a retry cannot duplicate them. The sidebar's box became a
+textarea for this: as an input it silently turned a pasted newline into a space
+and would have merged the list.
+
+**Left out on purpose.** Bulk promote, along with the planned modes that made
+one note an epic and the others its stories, which would need
+dependency-ordered creates in one commit; "separate items" waits until someone
+asks. The per-note monospace toggle, since fences already render as code.
+Capture from outside the app (`vault scratch add`, a global hotkey) and an age
+nudge in Agenda are the next steps worth taking, and are not built.
+
+**The e2e suite and load.** Running the suite while both sessions were building
+on one machine timed out `detail-outside-click` twice. The test, not the app,
+was wrong: a click during a write is ignored on purpose, and the commit that
+finishes a rename can still be running after the file has changed, so the
+closing click now repeats while the panel is open (#93). A cap on how many spec
+files run at once was measured, four at a time taking a full run from 47 s to
+75 s, and closed unmerged (#94): no run failed either way, so the cost bought
+nothing demonstrable. The paste spec restores the clipboard's text afterwards,
+because the clipboard is machine-wide and `--user-data-dir` does not isolate it.
+
+The version moved to 0.9.0 the same day (#83, #84). The number is read from
+`package.json` by the MCP handshake and `vault --version`, and by the app
+through `app.getVersion()`; the title row is where it shows.
+
+**Tests.** 246 core tests (20 over the store and promote, and one stdio MCP
+session over every scratch tool) and 185 desktop tests, typecheck clean, and
+the full e2e suite at 120/120, with new specs for the plumbing, the page,
+promote, the Claude draft and pasting. **Not verified:** the scratch tools from
+a live Claude Desktop or Claude Code session, Claude's drafts against the real
+API, the dark theme and a small window for the new panels, and a real process
+crash between promote's two writes, which the ordering argues for and no test
+reproduces.
