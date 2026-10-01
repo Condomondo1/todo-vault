@@ -303,3 +303,73 @@ test("mapState carries gaps only when it was given metadata", () => {
   assert.ok(without.exists && !("gaps" in without));
   assert.ok(withMeta.exists && withMeta.gaps?.length === 2);
 });
+
+test("converting defaults moves them into extraFields on Save, and an emptied block is written as {}", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jira-mapping-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "jira-map.yaml");
+  await fs.writeFile(
+    file,
+    [
+      "jiraProjectKey: ENG",
+      "fields:",
+      "  category: labels",
+      "# Older form, still read.",
+      "defaults:",
+      "  # Team, by id.",
+      "  customfield_10001: { id: t1 }",
+      "  customfield_10020: 7",
+      "",
+    ].join("\n"),
+  );
+  const current = mapOf({ defaults: { customfield_10001: { id: "t1" }, customfield_10020: 7 } });
+
+  // One at a time first: the other entry and the block's comment stay.
+  const partial = await writeJiraMap(
+    file,
+    mappingEdits(
+      choice({
+        extraFields: { customfield_10001: { name: "Team", mode: "always", value: { id: "t1" } } },
+        convertDefaults: ["customfield_10001"],
+      }),
+      CLASSIC,
+      current,
+    ),
+  );
+  assert.deepEqual(partial.defaults, { customfield_10020: 7 });
+  assert.deepEqual(partial.extraFields.customfield_10001, { name: "Team", mode: "always", value: { id: "t1" } });
+  assert.match(await fs.readFile(file, "utf8"), /# Older form, still read\./);
+
+  const all = await writeJiraMap(
+    file,
+    mappingEdits(
+      choice({
+        extraFields: {
+          customfield_10001: { name: "Team", mode: "always", value: { id: "t1" } },
+          customfield_10020: { mode: "always", value: 7 },
+        },
+        convertDefaults: ["customfield_10020"],
+      }),
+      CLASSIC,
+      partial,
+    ),
+  );
+  assert.deepEqual(all.defaults, {});
+  assert.match(await fs.readFile(file, "utf8"), /^defaults: \{\}$/m, "the key stays, written empty");
+  assert.deepEqual(all.extraFields.customfield_10020, { mode: "always", value: 7 });
+});
+
+test("a default is never removed unless the same Save carries it as an extra field", () => {
+  const current = mapOf({ defaults: { customfield_10001: { id: "t1" } } });
+  assert.throws(
+    () => mappingEdits(choice({ extraFields: {}, convertDefaults: ["customfield_10001"] }), CLASSIC, current),
+    /customfield_10001 is being moved out of defaults, but is not among the extra fields/,
+  );
+  // An id the file no longer has under defaults is nothing to remove.
+  const edits = mappingEdits(
+    choice({ extraFields: { customfield_1: { mode: "always" } }, convertDefaults: ["customfield_1"] }),
+    CLASSIC,
+    current,
+  );
+  assert.equal(edits.some((e) => e.path[0] === "defaults"), false);
+});

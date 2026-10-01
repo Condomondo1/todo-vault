@@ -43,8 +43,31 @@ export function newExtraField(meta: ProjectMeta, chosenTypes: string[], fieldId:
   return {
     ...(field ? { name: field.name } : {}),
     mode: "always",
-    ...(on.length < chosenTypes.length ? { issueTypes: on } : {}),
+    // On none of them is left unlimited rather than limited to nothing, which
+    // the map cannot say. The row says so, and the push drops it per screen.
+    ...(on.length > 0 && on.length < chosenTypes.length ? { issueTypes: on } : {}),
   };
+}
+
+/**
+ * Extra fields with the map's older `defaults` folded in: each one sent
+ * always, named and limited as a newly added field is, with its value as it
+ * was. It was written in Jira's shape, which the push's shaping passes
+ * through, so nothing is translated. An id already among the extra fields
+ * keeps that entry, since it was the one being sent over the default anyway.
+ */
+export function convertedDefaults(
+  meta: ProjectMeta,
+  chosenTypes: string[],
+  defaults: Record<string, unknown>,
+  current: Record<string, JiraExtraField>,
+): Record<string, JiraExtraField> {
+  const next = { ...current };
+  for (const [id, value] of Object.entries(defaults)) {
+    if (id in next) continue;
+    next[id] = { ...newExtraField(meta, chosenTypes, id), value };
+  }
+  return next;
 }
 
 /**
@@ -64,6 +87,9 @@ export function ExtraFields({
   value,
   onChange,
   people,
+  defaults,
+  converted,
+  onConvert,
 }: {
   meta: ProjectMeta;
   chosenTypes: string[];
@@ -73,7 +99,13 @@ export function ExtraFields({
   onChange: (next: Record<string, JiraExtraField>) => void;
   /** The map's linked people, for a user field's picker and for checking a typed name. */
   people: Record<string, JiraPersonLink>;
+  /** The map's older `defaults` block, as it is on disk. */
+  defaults: Record<string, unknown>;
+  /** The ids already converted in this draft, waiting for Save. */
+  converted: string[];
+  onConvert: () => void;
 }): React.JSX.Element {
+  const olderForm = Object.keys(defaults).filter((id) => !converted.includes(id));
   const known = useMemo(() => distinctFields(meta), [meta]);
 
   /** Fields on at least one chosen type, required first, not already covered. */
@@ -96,6 +128,23 @@ export function ExtraFields({
   return (
     <fieldset className="jira-extras">
       <legend>Extra fields</legend>
+      {olderForm.length > 0 && (
+        <div className="jira-defaults-notice">
+          <span className="field-note">
+            {olderForm.length} field{olderForm.length === 1 ? " uses" : "s use"} the older <code>defaults</code> form.
+          </span>
+          <span className="spacer" />
+          <button className="btn" onClick={onConvert}>
+            Convert
+          </button>
+        </div>
+      )}
+      {converted.length > 0 && (
+        <p className="field-note">
+          Moved {converted.length} from <code>defaults</code> into extra fields. Save to write it.
+        </p>
+      )}
+
       {Object.keys(value).length === 0 && (
         <p className="field-note">None. Add one for a Jira field the vault has nothing for, such as a team.</p>
       )}
@@ -131,6 +180,7 @@ export function ExtraFields({
               <span className="field-note">
                 {spec.issueTypes?.length ? `On ${spec.issueTypes.join(", ")}` : "On every type"}
                 {!field && " · not on this project's screens"}
+                {field && chosenTypes.length > 0 && typesWith(meta, chosenTypes, id).length === 0 && " · on none of the chosen types"}
               </span>
               <span className="spacer" />
               <button

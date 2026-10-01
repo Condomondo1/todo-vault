@@ -180,6 +180,12 @@ export interface JiraMappingChoice {
   extraFields?: Record<string, JiraExtraField>;
   /** The whole set of people, by the vault's spelling. Same rule as `extraFields`. */
   people?: Record<string, JiraPersonLink>;
+  /**
+   * `defaults` entries converted into `extraFields` on this Save, by field id,
+   * to be removed from `defaults`. The converted entries themselves travel in
+   * `extraFields` like any other.
+   */
+  convertDefaults?: string[];
 }
 
 /** A Jira field the vault has no equivalent for, and what to send in it. */
@@ -223,6 +229,8 @@ export type JiraMapState =
       fields: { startDate?: string; estimate?: string; category: string };
       extraFields: Record<string, JiraExtraField>;
       people: Record<string, JiraPersonLink>;
+      /** The older form of `extraFields`: always sent, in Jira's shape. Offered for conversion. */
+      defaults: Record<string, unknown>;
       /**
        * Required fields on a mapped issue type that nothing under this map can
        * fill in. Absent until this project's metadata has been loaded in this

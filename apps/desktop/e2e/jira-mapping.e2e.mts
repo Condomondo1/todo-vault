@@ -286,5 +286,37 @@ describe(
       await extra(RANK_FIELD).getByRole("button", { name: "Remove" }).click();
       await extra(RANK_FIELD).waitFor({ state: "detached" });
     });
+
+    test("an older defaults entry converts into an extra field on Save, leaving defaults empty", async () => {
+      await writeJiraMap(jiraMapPath(harness.vaultRoot), [{ path: ["defaults", TEAM_FIELD], value: { id: "t1" } }]);
+      await settings().getByRole("button", { name: "Close" }).last().click();
+      await settings().waitFor({ state: "hidden" });
+      await harness.page.getByRole("button", { name: "Jira", exact: true }).click();
+      await tab("Mapping").click();
+      await mapping().getByRole("button", { name: "Load project" }).click();
+
+      await mapping().getByText("1 field uses the older defaults form.").waitFor();
+      await mapping().locator(".jira-defaults-notice").getByRole("button", { name: "Convert" }).click();
+      await team().waitFor();
+      await team().getByText("On Epic, Story, Task").waitFor();
+      assert.equal(await team().locator("select").first().locator("option:checked").innerText(), "Platform");
+      // Nothing is written until Save, like every other edit here.
+      assert.deepEqual((await loadJiraMap(jiraMapPath(harness.vaultRoot))).defaults, { [TEAM_FIELD]: { id: "t1" } });
+
+      await mapping().getByRole("button", { name: "Save mapping" }).click();
+      await mapping().getByText("Saved to jira-map.yaml.").waitFor();
+      await mapping().locator(".jira-defaults-notice").waitFor({ state: "detached" });
+      const file = jiraMapPath(harness.vaultRoot);
+      const map = await loadJiraMap(file);
+      assert.deepEqual(map.extraFields[TEAM_FIELD], {
+        name: "Team",
+        mode: "always",
+        value: { id: "t1" },
+        issueTypes: ["Epic", "Story", "Task"],
+      });
+      assert.deepEqual(map.defaults, {});
+      assert.match(await fs.readFile(file, "utf8"), /^defaults: \{\}$/m);
+      assert.equal(await git("status", "--porcelain"), "");
+    });
   },
 );

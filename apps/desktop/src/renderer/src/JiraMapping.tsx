@@ -9,7 +9,7 @@ import {
 } from "todo-vault/jira-meta";
 import type { JiraExtraField, JiraMapState, JiraMappingChoice, JiraPersonLink, VaultIssueType } from "@shared/api";
 
-import { ExtraFields, PeopleLinks, newExtraField } from "./JiraMappingExtras";
+import { ExtraFields, PeopleLinks, convertedDefaults, newExtraField } from "./JiraMappingExtras";
 
 const VAULT_TYPES: Array<[VaultIssueType, string]> = [
   ["epic", "Epic"],
@@ -57,6 +57,8 @@ export function JiraMapping({ vaultPeople }: { vaultPeople: string[] }): React.J
   const [fields, setFields] = useState<JiraMappingChoice["fields"]>({ category: "labels" });
   const [extraFields, setExtraFields] = useState<Record<string, JiraExtraField>>({});
   const [people, setPeople] = useState<Record<string, JiraPersonLink>>({});
+  /** `defaults` entries converted into extra fields, to be removed from `defaults` on Save. */
+  const [convertDefaults, setConvertDefaults] = useState<string[]>([]);
   const [busy, setBusy] = useState<"load" | "save" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -140,6 +142,10 @@ export function JiraMapping({ vaultPeople }: { vaultPeople: string[] }): React.J
     (id): id is string => Boolean(id) && id !== "labels",
   );
 
+  // A converted field removed again before Save stays in `defaults`, so its
+  // value is never lost to a row someone took out, and the notice offers it again.
+  const converting = convertDefaults.filter((id) => id in extraFields);
+
   const save = async (): Promise<void> => {
     if (!meta || !complete) return;
     setBusy("save");
@@ -153,6 +159,7 @@ export function JiraMapping({ vaultPeople }: { vaultPeople: string[] }): React.J
       // for want of reading, not because someone removed everything, and
       // sending them would clear the file's.
       ...(map ? { extraFields, people } : {}),
+      ...(map && converting.length ? { convertDefaults: converting } : {}),
     });
     setBusy(null);
     if (!result.ok) {
@@ -166,6 +173,7 @@ export function JiraMapping({ vaultPeople }: { vaultPeople: string[] }): React.J
       setExtraFields(result.value.extraFields);
       setPeople(result.value.people);
     }
+    setConvertDefaults([]);
     setSaved(true);
   };
 
@@ -289,6 +297,13 @@ export function JiraMapping({ vaultPeople }: { vaultPeople: string[] }): React.J
             value={extraFields}
             onChange={setExtraFields}
             people={people}
+            defaults={map?.exists ? map.defaults : {}}
+            converted={converting}
+            onConvert={() => {
+              const olderForm = map?.exists ? map.defaults : {};
+              setExtraFields((cur) => convertedDefaults(meta, chosenTypes, olderForm, cur));
+              setConvertDefaults(Object.keys(olderForm));
+            }}
           />
 
           <PeopleLinks
