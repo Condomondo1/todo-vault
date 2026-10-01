@@ -15,6 +15,7 @@ import {
   type Status,
 } from "./schema.js";
 import { addDays, cadencePeriod, formatZodError, todayIso } from "./util.js";
+import { VERSION } from "./version.js";
 
 interface Args {
   _: string[];
@@ -94,6 +95,7 @@ Global options:
   --vault <dir>   Vault location (default: $VAULT_DIR or ./vault)
   --git           Auto-commit every write
   --json          Machine-readable output
+  --version       Print the version and exit
 
 Item options for new/set:
   --type epic|story|task|bug|subtask   --status ${STATUSES.join("|")}
@@ -303,6 +305,13 @@ async function main(): Promise<void> {
   const { _, flags } = parseArgs(process.argv.slice(2));
   const command = _[0];
   const sub = _[1];
+
+  // Checked before help: `vault --version` has no command, and would
+  // otherwise fall through to the help text.
+  if (flags.version || command === "version") {
+    process.stdout.write(`${VERSION}\n`);
+    return;
+  }
 
   if (!command || command === "help" || flags.help) {
     process.stdout.write(HELP);
