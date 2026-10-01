@@ -260,6 +260,14 @@ export interface UpdateChoice {
   jiraId?: string;
   /** Field id to the value to send, in Jira's shape: the chosen `JiraFieldChange.value`s. */
   fields: Record<string, unknown>;
+  /**
+   * Whether to stamp the item as matching Jira afterwards. Default true. False
+   * when a difference remains that the person did not decide about: one that
+   * appeared after they looked, or a ticked field Jira would not take. The
+   * fields sent are still sent, and the item keeps reading as changed, so the
+   * rest is offered at the next push rather than buried by the stamp.
+   */
+  restamp?: boolean;
 }
 
 export type UpdateProgress =
@@ -268,8 +276,11 @@ export type UpdateProgress =
   | { localKey: string; state: "failed"; message: string };
 
 export interface UpdateOutcome {
-  /** `fields` is what was sent; empty when the item was only marked as matching Jira. */
-  updated: Array<{ localKey: string; jiraKey: string; url: string; fields: string[] }>;
+  /**
+   * `fields` is what was sent; empty when the item was only marked as matching
+   * Jira. `restamped` is false when the choice asked for no stamp.
+   */
+  updated: Array<{ localKey: string; jiraKey: string; url: string; fields: string[]; restamped: boolean }>;
   failed: Array<{ localKey: string; message: string; fieldErrors: Record<string, string> }>;
 }
 
@@ -286,7 +297,8 @@ export interface UpdateSendOptions {
  * The restamp happens even when a person left some differing fields unticked.
  * Choosing to keep Jira's value for a field is a decision about it. Without
  * the restamp the item would read as changed forever, and the same field
- * would be offered at every push.
+ * would be offered at every push. A difference nobody decided about is the
+ * exception, which is what `restamp: false` is for.
  */
 export async function sendUpdates(
   client: JiraClient,
@@ -317,8 +329,9 @@ export async function sendUpdates(
       }
     }
 
+    const restamped = choice.restamp !== false;
     try {
-      await options.markPushed(choice.localKey, choice.jiraKey, choice.jiraId);
+      if (restamped) await options.markPushed(choice.localKey, choice.jiraKey, choice.jiraId);
     } catch (err) {
       const message = `${choice.jiraKey} ${ids.length ? "was updated in Jira" : "matches Jira"}, but recording that in the vault failed: ${err instanceof Error ? err.message : String(err)}. The next push will find nothing left to change.`;
       outcome.failed.push({ localKey: choice.localKey, message, fieldErrors: {} });
@@ -327,7 +340,7 @@ export async function sendUpdates(
     }
 
     const url = issueUrl(client.site, choice.jiraKey);
-    outcome.updated.push({ localKey: choice.localKey, jiraKey: choice.jiraKey, url, fields: ids });
+    outcome.updated.push({ localKey: choice.localKey, jiraKey: choice.jiraKey, url, fields: ids, restamped });
     options.onProgress?.({ localKey: choice.localKey, state: "updated", jiraKey: choice.jiraKey, url });
   }
 

@@ -4713,6 +4713,13 @@ offered at every push. An item whose diff is empty, because someone already
 made the change in Jira, is restamped with no request at all. That is how a
 `drifted` label finally heals.
 
+**Except a difference nobody decided about.** Reviewing the pane's PR found
+the gap in that rule. The push re-reads Jira, so its diff can hold a field that
+changed after the person looked, or a ticked field that Jira has since stopped
+accepting. Stamping then would bury that field until the next edit. So
+`UpdateChoice` takes `restamp: false`. The chosen fields are still sent, the
+item keeps reading as changed, and the rest is offered at the next push.
+
 **No journal.** The create journals each attempt because a dropped connection
 leaves a duplicate possible. A `PUT` repeated leaves the issue as one would, so
 a dropped update says sending it again is safe, and nothing is held back.
