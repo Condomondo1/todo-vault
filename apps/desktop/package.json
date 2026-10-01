@@ -13,8 +13,8 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "test": "tsx --test test/*.test.ts",
-    "//e2e": "Launches the built app, so it reads out/ rather than source — see the root e2e script's own comment for why building first is not optional here.",
-    "e2e": "tsx --test e2e/*.e2e.mts",
+    "//e2e": "Launches the built app, so it reads out/ rather than source — see the root e2e script's own comment for why building first is not optional here. Capped at four spec files at a time: tsx --test runs every file in parallel by default (one fewer than the core count), each launching its own Electron app, and under load several specs have timed out on polls that pass when run alone. Four costs about 30 seconds on a 16-core machine (see the PR that added it); two costs about 90.",
+    "e2e": "tsx --test --test-concurrency=4 e2e/*.e2e.mts",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.e2e.json"
   },
   "dependencies": {
