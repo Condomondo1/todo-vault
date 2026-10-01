@@ -3042,3 +3042,203 @@ kbd.pill {
   flex: 1;
   width: auto;
 }
+
+/* ---------------------------------------------------------------- scratch */
+/* The title row: identity, not a control. */
+.app-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-name {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+.app-version {
+  font: 10.5px var(--mono);
+  color: var(--text-faint);
+}
+
+/* The sidebar section: the same head as Projects, five one-line rows, then More. */
+.sb-scratch {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sb-scratch .sidebar-head,
+.sb-scratch + .sidebar-head {
+  padding-top: 12px;
+}
+
+.sb-notes {
+  padding: 0 8px;
+}
+
+.scratch-row {
+  padding: 5px 8px;
+}
+
+.sb-more .project-name {
+  color: var(--accent);
+  font-size: 11.5px;
+}
+
+.sb-more .project-count {
+  font: 10px var(--mono);
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.sb-empty {
+  padding: 4px 8px 8px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.sb-add {
+  padding: 0 8px 6px;
+}
+
+.sb-add input {
+  width: 100%;
+  padding: 5px 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  font-size: 12px;
+  outline: 0;
+}
+
+.sb-error {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--highest);
+}
+
+/* The page. */
+.scratch-page {
+  display: flex;
+  flex-direction: column;
+}
+
+.capture {
+  margin: 16px 16px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.capture:focus-within {
+  border-color: var(--accent);
+}
+
+.capture textarea {
+  display: block;
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  font: inherit;
+  color: var(--text);
+  background: none;
+  border: 0;
+  outline: 0;
+  padding: 10px 12px;
+}
+
+.capture-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.capture-error {
+  margin: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.scratch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 16px 24px;
+}
+
+.scratch-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.scratch-card:hover {
+  border-color: var(--border-strong);
+  border-left-color: var(--accent);
+}
+
+.scratch-card[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accent-dim) 55%, var(--bg-raised));
+  border-color: var(--accent);
+}
+
+/* A note is text somebody pasted: keep its line breaks, whatever the markdown says. */
+.scratch-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.scratch-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.scratch-x {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 4px;
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--text-faint);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.scratch-card:hover .scratch-x,
+.scratch-card[aria-selected="true"] .scratch-x,
+.scratch-card:focus-within .scratch-x {
+  opacity: 1;
+}
+
+.scratch-x:hover {
+  background: var(--bg-inset);
+  color: var(--highest);
+}
+
+.trash-group {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}

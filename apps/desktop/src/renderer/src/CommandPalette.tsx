@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Item } from "todo-vault";
+import type { Item, ScratchNote } from "todo-vault";
 import type { ProjectSummary } from "@shared/api";
 import { StatusPill, isClosed } from "./pieces";
+import { firstLine, matchNotes, shortAge } from "./scratch";
 
 /** A command the palette offers above its search results. */
 export interface PaletteAction {
@@ -34,17 +35,23 @@ export function CommandPalette({
   items,
   projects,
   actions = [],
+  notes = [],
   onClose,
   onSelectItem,
+  onSelectNote,
   onSelectProject,
 }: {
   /** The whole snapshot — deliberately unfiltered. */
   items: Item[];
   projects: ProjectSummary[];
   actions?: PaletteAction[];
+  /** Scratch notes, newest first. Searched only once something is typed. */
+  notes?: ScratchNote[];
   onClose: () => void;
   /** Opens the item detail panel. The palette closes itself after calling this. */
   onSelectItem: (key: string) => void;
+  /** Opens the Scratch page with this note selected. */
+  onSelectNote: (id: string) => void;
   /** Sets the sidebar project filter. Null means "all projects". */
   onSelectProject: (key: string | null) => void;
 }): React.JSX.Element {
@@ -107,8 +114,13 @@ export function CommandPalette({
     [actions, terms],
   );
 
+  // Notes only match a typed query: with none, "recent" means work, and a
+  // list of eight jotted lines would crowd it out.
+  const noteRows = useMemo(() => matchNotes(notes, terms).slice(0, LIMIT), [notes, terms]);
+
   type Row =
     | { kind: "action"; id: string; action: PaletteAction }
+    | { kind: "note"; id: string; note: ScratchNote }
     | { kind: "project"; id: string; project: ProjectSummary }
     | { kind: "item"; id: string; item: Item; snippet: string | null };
 
@@ -126,8 +138,9 @@ export function CommandPalette({
         item,
         snippet: text,
       })),
+      ...noteRows.map((note) => ({ kind: "note" as const, id: `n:${note.id}`, note })),
     ],
-    [actionRows, projectRows, itemRows],
+    [actionRows, projectRows, itemRows, noteRows],
   );
 
   useEffect(() => setCursor(0), [query]);
@@ -141,6 +154,7 @@ export function CommandPalette({
   const activate = (row: Row): void => {
     if (row.kind === "action") row.action.run();
     else if (row.kind === "project") onSelectProject(row.project.key);
+    else if (row.kind === "note") onSelectNote(row.note.id);
     else onSelectItem(row.item.key);
     onClose();
   };
@@ -171,6 +185,7 @@ export function CommandPalette({
   };
 
   const firstItemAt = actionRows.length + projectRows.length;
+  const firstNoteAt = firstItemAt + itemRows.length;
 
   return (
     <div className="palette-backdrop" onClick={onClose}>
@@ -215,10 +230,18 @@ export function CommandPalette({
                 </div>
               ) : null;
 
+            const notesHeading =
+              row.kind === "note" && index === firstNoteAt ? (
+                <div className="palette-group" key="notes-heading">
+                  Scratch
+                </div>
+              ) : null;
+
             return (
               <div key={row.id}>
                 {projectsHeading}
                 {heading}
+                {notesHeading}
                 <button
                   type="button"
                   className="palette-row"
@@ -234,6 +257,15 @@ export function CommandPalette({
                         </span>
                       </span>
                       <span className="palette-meta">{row.action.meta}</span>
+                    </>
+                  ) : row.kind === "note" ? (
+                    <>
+                      <span className="palette-summary">
+                        <span className="palette-title">
+                          <Highlight text={firstLine(row.note.text)} terms={terms} />
+                        </span>
+                      </span>
+                      <span className="palette-meta">{shortAge(row.note.created)}</span>
                     </>
                   ) : row.kind === "project" ? (
                     <>

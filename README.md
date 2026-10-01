@@ -38,6 +38,13 @@ Descriptions are edited as rich text and stored as plain markdown. Recurring
 work is ticked off for the current period rather than closed. Press `?` for
 every keyboard shortcut, and `Ctrl+K` to search everything.
 
+**A scratch pad.** The sidebar has a Scratch section on every view: the newest
+notes, a count, and a **+ new** (or `Shift+N`) that jots a note without leaving
+what you are doing. **More…** (or `6`) opens the full page. Notes are global,
+not filed under any project, and each is one file in `scratch/`. Removing one
+sends it to the trash with an Undo. Turning a note into an item is not in the
+app yet.
+
 **A command line.** Everything the app does, plus diagnostics and exports.
 
 **An MCP server.** Point Claude Desktop or Claude Code at the vault and ask in
