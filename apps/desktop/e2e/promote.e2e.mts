@@ -161,7 +161,7 @@ describe("promoting scratch notes, driven end to end", { concurrency: 1 }, () =>
     const text = await summary().inputValue();
     assert.ok(text.length <= 255);
     assert.match(text, /word\d+$/, "cut on a whole word");
-    assert.match(await panel().locator(".field-note").first().innerText(), /longer than 255/);
+    await panel().locator(".field-note", { hasText: /longer than 255/ }).waitFor({ state: "visible" });
 
     const description = (await panel().locator("div.description.prose.rich-surface").innerText()).trim();
     assert.ok(description.startsWith("…word"), `overflow leads the description, saw ${description.slice(0, 30)}`);

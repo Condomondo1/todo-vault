@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CreateItemInput, Item, ScratchNote } from "todo-vault";
-import type { ProjectSummary } from "@shared/api";
+import type { ClaudeStatus, ProjectSummary } from "@shared/api";
 
 import { ItemFormFields } from "./ItemFormFields";
 import { prefill } from "./promote";
@@ -83,6 +83,25 @@ export function PromotePanel({
   const [cutSummary, setCutSummary] = useState<string | null>(first.cut ? first.summary : null);
   const summaryRef = useRef<HTMLInputElement | null>(null);
 
+  // The optional Claude layer, as the New item dialog has it: null until the
+  // status answers, and drafting is shown as off rather than absent.
+  const [claude, setClaude] = useState<ClaudeStatus | null>(null);
+  const [drafting, setDrafting] = useState(false);
+  const [claudeNote, setClaudeNote] = useState("");
+  // Which note a draft was asked for, so a reply that arrives after the
+  // selection has moved on is dropped instead of landing in another note's form.
+  const draftFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void window.vault.claudeStatus().then((result) => {
+      if (live && result.ok) setClaude(result.value);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
   // A different note refills the form, keeping what is sticky. The first note is
   // already in the form from mount, so there is nothing to do for it.
   const seen = useRef(note.id);
@@ -94,11 +113,40 @@ export function PromotePanel({
     setCutSummary(next.cut ? next.summary : null);
     setCreatedKey(null);
     setError(null);
+    setClaudeNote("");
+    setDrafting(false);
+    draftFor.current = null;
   }, [note.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (focusToken !== null) summaryRef.current?.focus();
   }, [focusToken]);
+
+  /**
+   * Fill the form from Claude's reading of this note. Only ever on a click: it
+   * sends the note's text to the API, which a pasted query or a token should
+   * never do on its own. The draft is a proposal. The form shows it, and
+   * pressing Create is what makes it an item.
+   */
+  const draft = async (): Promise<void> => {
+    const asked = note.id;
+    draftFor.current = asked;
+    setDrafting(true);
+    setError(null);
+
+    const result = await window.vault.draftItem(note.text, form.values.project || null);
+    if (draftFor.current !== asked) return;
+    setDrafting(false);
+    draftFor.current = null;
+
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    form.applyDraft(result.value.input, { keepCategory: true });
+    setCutSummary(null);
+    setClaudeNote(result.value.notes);
+  };
 
   const submit = async (keep: boolean): Promise<void> => {
     if (saving || createdKey) return;
@@ -158,6 +206,35 @@ export function PromotePanel({
             {note.text}
           </div>
 
+          {claude && (claude.storageAvailable && claude.hasKey ? (
+            <div className="promote-draft">
+              <button
+                type="button"
+                className="btn"
+                disabled={drafting || saving}
+                onClick={() => void draft()}
+              >
+                {drafting ? "Drafting…" : "✦ Draft with Claude"}
+              </button>
+              <span className="field-note">
+                Sends this note to the Claude API — only when you click.
+              </span>
+            </div>
+          ) : (
+            <p className="field-note">
+              Drafting is off.{" "}
+              {claude.storageAvailable
+                ? "Add an API key under Claude in the sidebar to turn it on."
+                : "Encrypted key storage is unavailable on this machine."}
+            </p>
+          ))}
+
+          {claudeNote && (
+            <div className="draft-note">
+              <strong>Claude noted:</strong> {claudeNote}
+            </div>
+          )}
+
           <ItemFormFields
             form={form}
             projects={projects}
@@ -169,7 +246,7 @@ export function PromotePanel({
           {cutSummary !== null && form.values.summary === cutSummary && (
             <div className="field-note">
               The first line was longer than 255 characters. It is cut at a word, and the rest is
-              at the top of the description.
+              in the description.
             </div>
           )}
           {error && <div className="modal-error">{error}</div>}

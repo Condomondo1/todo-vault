@@ -46,7 +46,9 @@ sends it to the trash with an Undo. Select a note and a panel opens beside
 it with the item form already filled from the note's text (a local guess, not a
 call to Claude): `Ctrl+Enter` creates the item, the note leaves the pad, and the
 next note is selected. Project, parent and category carry over from one item to
-the next.
+the next. With an API key stored, a **Draft with Claude** button in the panel
+reads the note for you instead; it sends the note's text to the API only when
+you click it.
 
 **A command line.** Everything the app does, plus diagnostics and exports.
 

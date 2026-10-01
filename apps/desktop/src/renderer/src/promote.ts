@@ -44,7 +44,9 @@ export interface Prefill {
  *   goes to the top of the description, after an ellipsis, never dropped.
  * - A note that opens with a fence keeps its whole text as the description. The
  *   summary is then the first line of code, and splitting that line out would
- *   leave an unbalanced fence behind.
+ *   leave an unbalanced fence behind. That text already holds the whole line,
+ *   so a cut summary needs no overflow ahead of it: adding one would print the
+ *   tail twice.
  */
 export function prefill(text: string): Prefill {
   const lines = text.split("\n");
@@ -76,7 +78,7 @@ export function prefill(text: string): Prefill {
   return {
     type: guessType(text),
     summary,
-    description: [overflow, remaining].filter(Boolean).join("\n\n"),
+    description: fenced ? remaining : [overflow, remaining].filter(Boolean).join("\n\n"),
     cut: overflow !== "",
   };
 }

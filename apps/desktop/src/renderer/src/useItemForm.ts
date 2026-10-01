@@ -55,7 +55,7 @@ export function useItemForm({
    * is a proposal, and the confirmation step — the user reading it and pressing
    * Create — is the whole reason this is safe to offer.
    */
-  const applyDraft = useCallback((input: CreateItemInput) => {
+  const applyDraft = useCallback((input: CreateItemInput, options: { keepCategory?: boolean } = {}) => {
     setValues((v) => ({
       ...v,
       project: input.project,
@@ -64,7 +64,9 @@ export function useItemForm({
       description: input.description ?? "",
       ...(input.priority ? { priority: input.priority } : {}),
       dueDate: input.dueDate ?? "",
-      category: input.category ?? "",
+      // The promote panel keeps its sticky category when the draft names none,
+      // where the New item dialog, which has nothing to keep, clears it.
+      category: input.category ?? (options.keepCategory ? v.category : ""),
       labels: (input.labels ?? []).join(", "),
       cadence: input.cadence ?? "none",
       // Applied only when the draft names someone, unlike the fields above which
