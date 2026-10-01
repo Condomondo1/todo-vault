@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { TurnOnHistoryResult } from "todo-vault";
-import type { ScratchNote } from "todo-vault";
+import type { ScratchNote, TurnOnHistoryResult } from "todo-vault";
 import type { MaybeSnapshot, Result, VaultApi, VaultSnapshot } from "@shared/api";
 
 /**
@@ -373,6 +372,7 @@ export function useVault(): VaultState {
         return { error: result.message, note: null };
       }
       generation.current += 1;
+      setError(null);
       setSnapshot(result.value.snapshot);
       return { error: null, note: result.value.note };
     } catch (err) {
