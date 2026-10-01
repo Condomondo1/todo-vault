@@ -18,6 +18,10 @@ import {
   PROJECT_FRONTMATTER_ORDER,
   PROJECT_KEY_RE,
   ProjectSchema,
+  SCRATCH_DIR,
+  SCRATCH_FRONTMATTER_ORDER,
+  SCRATCH_ID_RE,
+  ScratchFrontmatterSchema,
   TRANSITIONS,
   UpdateItemInput,
   UpdateProjectInput,
@@ -25,6 +29,7 @@ import {
   type Cadence,
   type Item,
   type Project,
+  type ScratchNote,
   type Status,
 } from "./schema.js";
 import {
@@ -173,6 +178,26 @@ export interface TrashEntry {
   hasAttachments: boolean;
 }
 
+export interface ScratchTrashEntry {
+  /** Filename inside .trash/scratch — pass this to restoreScratch. */
+  file: string;
+  id: string;
+  trashedAt: string;
+  /** The note's first line, when the file still parses. */
+  preview?: string;
+}
+
+export interface RemoveScratchResult {
+  id: string;
+  /** What restoreScratch takes to put it back. */
+  file: string;
+  /** Where the note went, relative to the vault root. */
+  trashedTo: string;
+}
+
+/** Longer than any sane note, short enough that a runaway paste is refused. */
+export const SCRATCH_MAX_CHARS = 100_000;
+
 export interface GitStatus {
   /** Whether auto-commit was requested when the vault was opened. */
   enabled: boolean;
@@ -287,6 +312,18 @@ export class Vault {
 
   get projectTrashDir(): string {
     return path.join(this.trashDir, "projects");
+  }
+
+  get scratchDir(): string {
+    return path.join(this.root, SCRATCH_DIR);
+  }
+
+  get scratchTrashDir(): string {
+    return path.join(this.trashDir, SCRATCH_DIR);
+  }
+
+  private scratchPath(id: string): string {
+    return path.join(this.scratchDir, `${id}.md`);
   }
 
   /**
@@ -1326,6 +1363,156 @@ export class Vault {
     return item;
   }
 
+  // ---------------------------------------------------------------- scratch
+
+  /*
+   * The scratch pad: one file per note, `scratch/<id>.md`.
+   *
+   * One file per note rather than one shared file because the app and the MCP
+   * server are separate processes writing the same vault. A shared list is
+   * read-modify-write, and two writers interleaving lose one of the writes.
+   * Here, add, remove and restore each touch exactly one file, so they cannot
+   * clobber each other — the same answer the vault gives for items.
+   *
+   * Nothing is cached. Every MCP tool call reloads the vault anyway, and the
+   * desktop re-reads on a watcher event, so an index would only be one more
+   * thing that can go stale. `load()` does not read this folder.
+   */
+
+  /**
+   * Create `scratch/` if it is missing. Vaults made before the pad have no such
+   * folder, and the desktop calls this before pointing its file watcher there.
+   */
+  async ensureScratchDir(): Promise<void> {
+    await fs.mkdir(this.scratchDir, { recursive: true });
+  }
+
+  /**
+   * Every note, newest first. A file that will not parse is skipped and named in
+   * `errors`, never thrown, so one hand-edited note cannot hide the rest.
+   */
+  async listScratch(): Promise<{ notes: ScratchNote[]; errors: string[] }> {
+    let entries: string[];
+    try {
+      entries = await fs.readdir(this.scratchDir);
+    } catch (err) {
+      if (hasErrorCode(err, "ENOENT")) return { notes: [], errors: [] };
+      throw err;
+    }
+
+    const notes: ScratchNote[] = [];
+    const errors: string[] = [];
+    for (const entry of entries) {
+      if (!entry.endsWith(".md")) continue;
+      const filePath = path.join(this.scratchDir, entry);
+      try {
+        notes.push(parseScratch(await fs.readFile(filePath, "utf8"), entry.slice(0, -3)));
+      } catch (err) {
+        // A note deleted between readdir and readFile is simply gone, not broken.
+        if (hasErrorCode(err, "ENOENT")) continue;
+        errors.push(`${toPosixPath(path.relative(this.root, filePath))}: ${formatZodError(err)}`);
+      }
+    }
+
+    notes.sort((a, b) => b.created.localeCompare(a.created) || a.id.localeCompare(b.id));
+    return { notes, errors };
+  }
+
+  /**
+   * Add a note. The text is kept as written, apart from leading blank lines and
+   * trailing whitespace; leading indentation on the first line survives, which
+   * matters for a pasted YAML or Python snippet.
+   */
+  async addScratch(rawText: string): Promise<ScratchNote> {
+    const text = normalizeScratchText(rawText);
+    if (!text) throw new VaultError("A scratch note needs some text");
+    if (text.length > SCRATCH_MAX_CHARS) {
+      throw new VaultError(
+        `That note is ${text.length.toLocaleString("en")} characters; the limit is ${SCRATCH_MAX_CHARS.toLocaleString("en")}. ` +
+          "Attach a file to an item for anything that size.",
+      );
+    }
+
+    const note: ScratchNote = { id: randomUUID(), created: nowIso(), text };
+    // Exclusive, though a UUID collision is not a real risk: the point is that
+    // this write can never replace a file, whatever is already there.
+    await createFileExclusive(this.scratchPath(note.id), serializeScratch(note));
+    await this.commit("Add scratch note");
+    return note;
+  }
+
+  /** Move a note to `.trash/scratch/`. Recoverable with restoreScratch. */
+  async removeScratch(id: string): Promise<RemoveScratchResult> {
+    // `id` may arrive over IPC or MCP, so it never gets to name a path.
+    if (!SCRATCH_ID_RE.test(id)) throw new VaultError(`Not a scratch note id: ${id}`);
+
+    const stamp = nowIso().replace(/[:.]/g, "-");
+    const file = `${id}-${stamp}.md`;
+    await fs.mkdir(this.scratchTrashDir, { recursive: true });
+    try {
+      await fs.rename(this.scratchPath(id), path.join(this.scratchTrashDir, file));
+    } catch (err) {
+      if (hasErrorCode(err, "ENOENT")) throw new VaultError(`No scratch note ${id}`);
+      throw err;
+    }
+
+    await this.commit("Trash scratch note");
+    return { id, file, trashedTo: `.trash/${SCRATCH_DIR}/${file}` };
+  }
+
+  async listTrashedScratch(): Promise<ScratchTrashEntry[]> {
+    let entries: string[];
+    try {
+      entries = await fs.readdir(this.scratchTrashDir);
+    } catch {
+      return [];
+    }
+
+    const out: ScratchTrashEntry[] = [];
+    for (const file of entries) {
+      const match = SCRATCH_TRASH_RE.exec(file);
+      if (!match) continue;
+      let preview: string | undefined;
+      try {
+        const note = parseScratch(
+          await fs.readFile(path.join(this.scratchTrashDir, file), "utf8"),
+          match[1],
+        );
+        preview = firstLine(note.text);
+      } catch {
+        // Listed unlabelled rather than hidden, as trashed items are.
+      }
+      out.push({ file, id: match[1], trashedAt: match[2], ...(preview ? { preview } : {}) });
+    }
+    return out.sort((a, b) => b.trashedAt.localeCompare(a.trashedAt));
+  }
+
+  /** Put a trashed note back, unchanged, under its original id. */
+  async restoreScratch(file: string): Promise<ScratchNote> {
+    const match = SCRATCH_TRASH_RE.exec(file);
+    if (!match) {
+      throw new VaultError(`Expected a filename from listTrashedScratch(), got: ${file}`);
+    }
+    const source = path.join(this.scratchTrashDir, file);
+
+    let note: ScratchNote;
+    try {
+      note = parseScratch(await fs.readFile(source, "utf8"), match[1]);
+    } catch (err) {
+      if (hasErrorCode(err, "ENOENT")) throw new VaultError(`Nothing called ${file} in the scratch trash`);
+      throw new VaultError(`${file} no longer reads as a scratch note: ${formatZodError(err)}`);
+    }
+
+    const target = this.scratchPath(note.id);
+    if (await pathExists(target)) {
+      throw new VaultError(`Scratch note ${note.id} is already on the pad`);
+    }
+    await fs.mkdir(this.scratchDir, { recursive: true });
+    await fs.rename(source, target);
+    await this.commit("Restore scratch note from trash");
+    return note;
+  }
+
   // -------------------------------------------------------------- projects
 
   async updateProject(key: string, rawPatch: unknown): Promise<Project> {
@@ -2097,7 +2284,7 @@ export class Vault {
             `projects/${query.project}.md`,
             `.trash/items/${query.project}-*.md`,
           ]
-        : ["items", "projects", ".trash/items"];
+        : ["items", "projects", ".trash/items", SCRATCH_DIR, `.trash/${SCRATCH_DIR}`];
 
     const args = [
       "-c",
@@ -2347,6 +2534,52 @@ const MAX_KEY_ATTEMPTS = 20;
 /** The number in `ACME-12`. */
 function keyNumber(key: string): number {
   return Number.parseInt(key.slice(key.lastIndexOf("-") + 1), 10);
+}
+
+/** `.trash/scratch/<id>-2026-10-01T14-02-11-123Z.md` → id, stamp. */
+const SCRATCH_TRASH_RE = new RegExp(
+  `^(${SCRATCH_ID_RE.source.slice(1, -1)})-(\\d{4}-\\d{2}-\\d{2}T[\\d-]+Z)\\.md$`,
+);
+
+/**
+ * `expectedId` is the filename's id. A file whose frontmatter names a different
+ * one is refused rather than trusted, because removing it by the id in the list
+ * would then name a file that does not exist.
+ */
+function parseScratch(raw: string, expectedId: string): ScratchNote {
+  const { data, body } = parseFrontmatter(raw);
+  const front = ScratchFrontmatterSchema.parse(data);
+  if (front.id !== expectedId) {
+    throw new VaultError(`its id (${front.id}) does not match its filename`);
+  }
+  return { id: front.id, created: front.created, text: body };
+}
+
+/**
+ * Not `serializeFrontmatter(…, text)`: that trims the body, which would strip
+ * the indentation from a pasted snippet's first line. The reader only drops
+ * leading newlines, so writing the text after the blank line keeps it intact.
+ */
+function serializeScratch(note: ScratchNote): string {
+  const head = serializeFrontmatter(
+    { id: note.id, created: note.created },
+    "",
+    SCRATCH_FRONTMATTER_ORDER,
+  ).trimEnd();
+  return `${head}\n\n${note.text}\n`;
+}
+
+function normalizeScratchText(text: string): string {
+  return text.replace(/\r\n?/g, "\n").replace(/^(?:[ \t]*\n)+/, "").trimEnd();
+}
+
+function firstLine(text: string): string | undefined {
+  return (
+    text
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line && !line.startsWith("```")) || undefined
+  );
 }
 
 /** See `advanceCounter`: enough to outlast a burst of concurrent creates. */

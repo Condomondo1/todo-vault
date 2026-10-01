@@ -79,7 +79,10 @@ function FileRow({
 
   const label = (
     <>
-      <span className="history-key">{file.key ?? file.path}</span>
+      {/* A note's key is a UUID, which says nothing; its first line is the title. */}
+      <span className="history-key">
+        {file.subject === "scratch" ? "scratch" : (file.key ?? file.path)}
+      </span>
       {badge && <span className="pill">{badge}</span>}
       {file.title && <span className="history-title">{truncate(file.title)}</span>}
     </>

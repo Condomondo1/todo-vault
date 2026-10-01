@@ -5,6 +5,7 @@ export {
   compareByRank,
   compareProjectsByRank,
   TURN_ON_HISTORY_SUBJECT,
+  SCRATCH_MAX_CHARS,
 } from "./vault.js";
 export type {
   VaultOptions,
@@ -15,6 +16,8 @@ export type {
   MoveProjectResult,
   BulkUpdateResult,
   TrashEntry,
+  ScratchTrashEntry,
+  RemoveScratchResult,
   GitStatus,
   TurnOnHistoryOptions,
   TurnOnHistoryResult,

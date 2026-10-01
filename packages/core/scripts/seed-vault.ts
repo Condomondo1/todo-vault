@@ -436,9 +436,29 @@ async function main(): Promise<void> {
   // and not the one the Jira row is for.
   await vault.markPushed(schemaStory.key, "ENG-412", "10412");
 
+  // ---------------------------------------------------------------- scratch
+  // One of each shape the pad has to render: a plain thought, a link, a fenced
+  // snippet, an indented one, and a first line long enough to hit the 255 cap
+  // when promoted.
+  for (const text of [
+    "Ask Dana whether the Q4 vendor review needs a security questionnaire",
+    "https://example.com/docs/rate-limits — read before touching the retry code",
+    "Slow ticket owners:\n```sql\nSELECT owner, count(*) FROM tickets\nWHERE status = 'open'\nGROUP BY owner;\n```",
+    "  retry: 3\n  backoff: exponential\n  max_wait: 30s",
+    "Customer escalation from the call: exports time out for any workspace with more than 50k rows " +
+      "because the CSV writer buffers the whole result in memory before streaming, support has a " +
+      "workaround (filter by month and export twelve times) but two accounts have asked for a date",
+  ]) {
+    await vault.addScratch(text);
+  }
+
   // ----------------------------------------------------------------- report
-  const { items, projects, errors } = await vault.load();
-  process.stdout.write(`Seeded ${projects} projects and ${items} items at ${root}\n`);
+  const { items, projects, errors: itemErrors } = await vault.load();
+  const pad = await vault.listScratch();
+  const errors = [...itemErrors, ...pad.errors];
+  process.stdout.write(
+    `Seeded ${projects} projects, ${items} items and ${pad.notes.length} scratch notes at ${root}\n`,
+  );
   if (errors.length) {
     process.stdout.write(`\n${errors.length} file(s) failed to parse:\n`);
     for (const e of errors) process.stdout.write(`  - ${e}\n`);

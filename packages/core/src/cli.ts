@@ -335,7 +335,12 @@ async function main(): Promise<void> {
   switch (command) {
     case "doctor": {
       const { items, projects, errors } = await vault.load();
-      process.stdout.write(`${projects} projects, ${items} items loaded from ${vault.root}\n`);
+      // load() does not read the pad (it is read from disk on demand), so a
+      // broken note would otherwise pass doctor and only vanish from the list.
+      const scratch = await vault.listScratch();
+      process.stdout.write(
+        `${projects} projects, ${items} items, ${scratch.notes.length} scratch notes loaded from ${vault.root}\n`,
+      );
       const dangling: string[] = [];
       let offset = 0;
       for (;;) {
@@ -368,7 +373,7 @@ async function main(): Promise<void> {
         // Belt-and-suspenders: stops the loop if total and the page ever disagree.
         if (offset >= page.total || !page.items.length) break;
       }
-      const problems = [...errors, ...dangling];
+      const problems = [...errors, ...scratch.errors, ...dangling];
       if (!problems.length) {
         process.stdout.write("No problems found.\n");
       } else {

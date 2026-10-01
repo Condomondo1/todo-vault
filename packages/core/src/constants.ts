@@ -121,6 +121,17 @@ export const FRONTMATTER_ORDER: readonly string[] = [
   "updated",
 ];
 
+/**
+ * The scratch pad's folder, vault-relative. Here rather than only in vault.ts
+ * so the desktop's file watcher names the same folder the core writes to.
+ */
+export const SCRATCH_DIR = "scratch";
+
+/** A scratch note's id: a v4-shaped UUID, also its filename. */
+export const SCRATCH_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export const SCRATCH_FRONTMATTER_ORDER: readonly string[] = ["id", "created"];
+
 export const PROJECT_FRONTMATTER_ORDER: readonly string[] = [
   "key",
   "name",

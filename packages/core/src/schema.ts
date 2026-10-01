@@ -7,6 +7,7 @@ import {
   LINK_TYPES,
   PRIORITIES,
   PROJECT_KEY_RE,
+  SCRATCH_ID_RE,
   STATUSES,
   SYNC_STATES,
 } from "./constants.js";
@@ -212,6 +213,25 @@ export const ProjectSchema = z
 
 export type ProjectFrontmatter = z.infer<typeof ProjectSchema>;
 export type Project = ProjectFrontmatter & { description: string };
+
+/**
+ * A scratch note: `scratch/<id>.md`, this frontmatter, and the note's text as
+ * the body. Not an item — no key, no project, nothing Jira ever sees.
+ *
+ * Passthrough rather than strict, unlike items and projects. The pad is the
+ * likeliest place for a field to arrive later (a per-note monospace flag is
+ * already planned), and an MCP server one version behind the app is a normal
+ * state (SCHEMA.md). Strict would make that older reader drop every newer
+ * note from the list; passthrough lets it show them.
+ */
+export const ScratchFrontmatterSchema = z
+  .object({
+    id: z.string().regex(SCRATCH_ID_RE, "A scratch note id is a UUID"),
+    created: isoDateTime,
+  })
+  .passthrough();
+
+export type ScratchNote = { id: string; created: string; text: string };
 
 /**
  * Fields an update may touch. `key` is absent on purpose — changing it re-keys
