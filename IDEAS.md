@@ -8,6 +8,27 @@ for the shape of one of those).
 Newest at the top. No status tracking here — once something's picked up, its
 entry moves out to wherever it's being built.
 
+## The sidebar's scratch box should clear after an add, and say so
+
+Reported from use on 2026-10-01. In the sidebar's Scratch section, *+ new*
+opens a box, and pressing Ctrl+Enter in it creates a note each time but leaves
+the text in the box. Nothing visible changes beyond the count and the list
+under it, so it reads as though the note was not made, and pressing again makes
+a duplicate.
+
+What it should do: once a note is saved, empty the box (keep it open and
+focused for the next one) and show a toast such as *Note added to Scratch*. A
+second identical press then has nothing to save.
+
+Where to start: `ScratchSection.tsx`. Its `onKeyDown` handles plain Enter
+only, and deliberately lets Ctrl and Meta+Enter through, and its `submit`
+already clears the draft on success. So the Ctrl+Enter that adds a note is
+reaching some other handler, likely a window-level shortcut, that saves the
+text without going through `submit`. Find that path first, then either route
+it through `submit` or have it clear the draft too. `ScratchPage.tsx` has the
+same Enter guard, so check whether the page's box behaves the same way. The
+Undo toast a remove already shows is the shape to copy for the confirmation.
+
 ## The ✕ should ask before it throws away an unsent comment
 
 A click beside the open item no longer closes it while a comment is typed and
