@@ -22,10 +22,10 @@ panel already knows this: it is what `onOutstandingChange` reports to App.
 Escape's last rung, closing the panel, would want the same check, or the two
 ways out of the panel would disagree.
 
-## The command palette finds things but cannot do anything
+## The command palette has one verb and wants more
 
-`CommandPalette.tsx` searches two kinds of row, projects and items, and opening
-one is the only thing it can do. Every edit still goes through the detail panel
+`CommandPalette.tsx` searches projects and items, and has one action, *Push to
+Jira…*, added with the update pane. Opening a row is otherwise all it can do. Every edit still goes through the detail panel
 or a single-key shortcut, and nothing lets you type an action and have the
 palette find it. The usual next step for a palette is verbs: *set due…*, *move to
 status…*, *assign…*, *tick*, *open History for this item*. Each one applies to
@@ -228,7 +228,8 @@ happened twice when this was first written — `c43d414` fixed
 96 tests in 69/27 against a real 114 in 78/36 — and it has happened twice more
 since, both times caught by a person reading the tree rather than by anything
 automatic. A step that runs the suite, reads the totals out of the TAP summary
-and fails on a mismatch would catch every one of them.
+and fails on a mismatch would catch every one of them. `README.md` took the
+other route in #79 and states no counts any more.
 
 The reason it is still an idea and not a workflow step is that it is a check on
 prose, and prose gets reworded. It would need maintaining in a way the test run
@@ -236,12 +237,6 @@ never does, and a check that fails because a sentence was rephrased teaches
 people to ignore it. The cheaper and less satisfying alternative is to stop
 putting counts in prose at all — worth pricing against the check before writing
 either, since one of them is a permanent tax and the other is a one-off edit.
-
-**Related, and verified rather than assumed: `main` is not a protected branch.**
-`gh api repos/rellik92j/todo-vault/branches/main/protection` returns 404. A
-workflow that runs is not a workflow that gates, so a red run today is a red X
-that can be merged straight past. Turning on branch protection is a settings
-change rather than a code one, which is exactly why it keeps not happening.
 
 ## Filter the agenda by item type
 
@@ -343,43 +338,6 @@ means, and does it from any day. `nextMonth` is worth adding for the case
 `next30Days` cannot serve — planning a calendar month that has not started, the
 forward twin of `month`'s rollup — and the `<select>` should be ordered and
 labelled so the two do not read as synonyms.
-
-## A drifted item still cannot be pushed as an update
-
-Fixing the planner's eligibility check left the harder half standing: nothing in
-the repo updates an existing Jira issue. `buildPushPlan` only ever creates, so a
-drifted item's choices are a duplicate issue or a hand edit. The plan now says so
-in a warning, which is honest, but the remedy is still manual — edit Jira, then
-call `vault_mark_pushed` again to re-stamp the baseline. That call rebuilds
-`sync` from scratch (`Vault.markPushed`), so it wants `jiraKey` re-supplied and
-`jiraId` re-supplied too, or the id is silently dropped. No SCHEMA.md entry or
-tool description says any of this. The CLI half has narrowed since this was
-written: `vault jira record --from <file.csv>` (PR #53) stamps a whole import's
-worth of keys from the CSV Jira exports back out. That covers the bulk-create
-path. It does not cover re-stamping one hand-edited drifted item, which is still
-MCP-only.
-
-A smaller thing worth folding in whenever this is picked up: drift is one-way —
-`markDriftIfChanged` moves `pushed → drifted` and never back — so an item edited
-and then reverted keeps the `drifted` pill in the detail panel forever. The push
-planner no longer cares, since it compares hashes rather than trusting the
-label, but the UI still misreports it. Healing the label needs a rule about what
-`pushed` means when nothing was pushed, which is why it sits here rather than
-having been fixed alongside the hash.
-
-One caution for whoever picks this up, kept because getting it wrong once is
-instructive: this entry used to warn that `PLAN-LINKS.md` was wrong to say
-adding a link flips a pushed item to `drifted`. The observation was right —
-`links` was absent from `pushableFields` and `addLink` persisted without
-recomputing anything — and the conclusion was backwards. Links *are* pushed, in
-the description footer, so the doc described correct behaviour that had never
-been built. Both halves are fixed now (see PLAN.md, "Links count as drift"): the
-field list gained `links`, and the recomputation moved into `persist`, where the
-writers that skip `updateItem` go through it too.
-
-So the standing advice survives in a sharper form. Check the field list rather
-than the prose — and when the two disagree, ask which one Jira would agree with
-before assuming the prose is the stale half.
 
 ## A `parked` status, if Hide later turns out not to be enough
 

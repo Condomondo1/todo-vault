@@ -86,7 +86,8 @@ has already chosen the call. What this skill adds is recognizing the moment
    drifts it — but summary, description, and a first move into
    `in_progress` (which stamps `startDate`, which is pushed) all do. Not a
    reason to refuse the edit; a reason to mention it, since someone
-   downstream is reading the Jira copy.
+   downstream is reading the Jira copy. The desktop app's push pane can
+   update the Jira issue field by field; no MCP tool sends anything.
 
 10. **`components` exists in the schema but is not exposed by any MCP tool.**
     Say so if asked, rather than writing the value into `labels` and calling
