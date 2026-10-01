@@ -232,3 +232,87 @@ test("the map-level gap is Team until an extra field for Story fills it", () => 
     "issue type names match the way buildPushPlan matches them",
   );
 });
+
+// ------------------------------------------------- typed values are shaped
+
+const CT = "com.atlassian.jira.plugin.system.customfieldtypes:";
+
+/** Story with a paragraph field, an option field with Jira's list, and Rank. */
+function shapingMeta(): ProjectMeta {
+  const m = meta();
+  const story = m.issueTypes.find((t) => t.name === "Story")!;
+  story.fields = story.fields.map((f) =>
+    f.fieldId === "customfield_10001"
+      ? { ...f, schema: { type: "option", custom: `${CT}select` }, allowedValues: [{ id: "t1", value: "Payments" }] }
+      : f,
+  );
+  story.fields.push(
+    field("customfield_10100", { name: "Project objective", schema: { type: "string", custom: `${CT}textarea` } }),
+    field("customfield_10019", { name: "Rank", schema: { type: "any", custom: "com.pyxis.greenhopper.jira:gh-lexo-rank" } }),
+  );
+  return m;
+}
+
+test("typed extra values are sent in Jira's shape: a paragraph as ADF, an option by id", async () => {
+  const vault = await tmpVault();
+  await vault.createItem({ project: "ACME", summary: "S", type: "story" });
+  const m = map({
+    extraFields: {
+      customfield_10001: { name: "Team", mode: "ask", value: "payments" },
+      customfield_10100: { mode: "always", value: "Cut checkout time." },
+    },
+  });
+  const plan = buildPushPlan(await items(vault), m, vault, { meta: shapingMeta() });
+
+  assert.deepEqual(plan.blockers, []);
+  const fields = plan.drafts[0].fields;
+  assert.deepEqual(fields.customfield_10001, { id: "t1" });
+  assert.equal((fields.customfield_10100 as { type: string }).type, "doc");
+
+  const asked = buildPushPlan(await items(vault), m, vault, { meta: shapingMeta(), askValues: { customfield_10001: "Platform" } });
+  assert.equal(asked.blockers.length, 1, "an ask value is checked as well");
+  assert.match(asked.blockers[0].message, /Team has no option "Platform"\. Jira offers: Payments\./);
+});
+
+test("without metadata a typed value goes as written, since nothing says what it should be", async () => {
+  const vault = await tmpVault();
+  await vault.createItem({ project: "ACME", summary: "S", type: "story" });
+  const m = map({ extraFields: { customfield_10001: { mode: "always", value: "payments" } } });
+  assert.equal(buildPushPlan(await items(vault), m, vault).drafts[0].fields.customfield_10001, "payments");
+});
+
+test("Rank is never sent, and a blank extra field sends nothing and fills no gap", async () => {
+  const vault = await tmpVault();
+  await vault.createItem({ project: "ACME", summary: "S", type: "story" });
+  const m = map({
+    extraFields: {
+      customfield_10019: { name: "Rank", mode: "always", value: "0|i0000:" },
+      customfield_10001: { name: "Team", mode: "always", value: "  " },
+    },
+  });
+  const plan = buildPushPlan(await items(vault), m, vault, { meta: shapingMeta() });
+  assert.equal("customfield_10019" in plan.drafts[0].fields, false);
+  assert.ok(plan.warnings.some((w) => /Rank is set by Jira itself/.test(w)));
+  assert.equal("customfield_10001" in plan.drafts[0].fields, false);
+  assert.match(plan.blockers[0]?.message ?? "", /needs Team/, "a blank required field is still a gap");
+  assert.equal(fieldsTheMapCanFill(m, "Story").has("customfield_10001"), false);
+});
+
+// ------------------------------------------------------------- drifted
+
+test("the app's push holds back an item changed since its push instead of creating it twice", async () => {
+  const vault = await tmpVault();
+  const settled = await vault.createItem({ project: "ACME", summary: "Settled" });
+  const edited = await vault.createItem({ project: "ACME", summary: "Edited" });
+  await vault.markPushed(settled.key, "ENG-1");
+  await vault.markPushed(edited.key, "ENG-2");
+  await vault.updateItem(edited.key, { summary: "Edited after the push" });
+
+  const held = buildPushPlan(await items(vault), map(), vault, { holdDrifted: true });
+  assert.deepEqual(held.drafts, []);
+  const reason = held.skipped.find((s) => s.localKey === edited.key)?.reason ?? "";
+  assert.match(reason, /Changed since it was pushed as ENG-2\. Updating an existing issue is not supported yet/);
+
+  const planned = buildPushPlan(await items(vault), map(), vault);
+  assert.deepEqual(planned.drafts.map((d) => d.localKey), [edited.key], "the MCP and CSV planners still offer it, with a warning");
+});

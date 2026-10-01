@@ -4402,3 +4402,107 @@ and the full e2e suite 62/62. **Not verified:** the other four views were not
 driven. They share the listener, and all that differs between them is the
 `data-item-key` markup. Nobody has yet spent the plan's ten minutes of real use
 deciding whether "empty space" feels right on a busy board.
+
+## Jira values are typed as a person means them, and shaped by the core ✅ built (core half)
+
+The first real use of the push, against a production Jira, showed what the
+design got wrong. Every extra field without a control of its own fell to a
+JSON box labelled *sent exactly as written*. On a real project that was most of
+them. The ones that hit were paragraph fields (*Project objective / goal*,
+*Proposed solution at onset*), people fields other than the assignee,
+cascading selects, and custom text and multi-select fields. A person was
+expected to write ADF by hand to say one sentence. The ask that came back was
+plain: accept a valid value and build the JSON.
+
+**Shaping moved from the editor to the planner.** `plans/PLAN-jira-push.md` had
+every value stored *already in Jira's shape*, so the push never translates. The
+consequence was that the editor had to emit Jira's JSON, so any field without a
+bespoke editor dumped that JSON on the person. Now `shapeFieldValue` in
+`jira-meta.ts` takes what was typed and the field's create-screen metadata, and
+returns Jira's shape:
+- an option's name becomes `{ id }`, matched against Jira's own list
+- a paragraph becomes ADF
+- a person's name becomes `{ accountId }`, through the map's `people`
+- `Parent / Child` becomes a cascading value
+- `a, b` becomes a list
+- a browser's `2026-10-01T09:30` becomes Jira's full datetime with the local zone
+
+It runs in `buildPushPlan`, inside the screen check, so each value is shaped
+against the field on that draft's own issue type. That's where the metadata
+already was, and where a field's options can differ between types.
+
+**Idempotent, so nothing already written breaks.** A value that is already
+Jira-shaped (`{ id }`, an ADF document, `{ accountId }`) comes back unchanged.
+Every map written before this, by hand or by Settings → Jira, pushes exactly as
+it did. `defaults`, the older hand-written form, is not shaped at all.
+
+**A value that cannot be shaped is a blocker, with Jira's options named.**
+"Valid" means valid against this project's screen: *Team has no option
+"Paymnts". Jira offers: Payments, Platform.* That is the same line Jira's own
+400 would have drawn, but drawn before anything is sent, with the fix in the
+message. A stored `{ id }` whose option has since been deleted is refused the
+same way, which the plan wanted from sending ids rather than names. Where a
+field lists no values, an option goes as `{ value }` and a version as
+`{ name }`. Jira accepts both and checks them itself.
+
+**New kinds, each with a reason.**
+- `managed` covers Rank, which Jira keeps for the board's order. It was offered
+  as an extra field and showed a JSON box. It is now never sent, with a
+  grouped warning.
+- `sprint` takes the sprint's number.
+- `team` takes the team's id as a string. Whether every site takes the bare id
+  or `{ id }` is still unverified, so an object is left as written.
+- `strings` covers array-of-string custom fields. They used to be `raw`, and
+  are now a comma list. A custom *labels* field is `labels`, with spaces
+  hyphenated as Jira requires.
+- `group`, `groups` and `project` are small, but no longer JSON.
+- `raw` remains for app fields whose schema says nothing. If Jira lists values
+  for one, it is treated as a select over them. Otherwise text goes as text, and
+  JSON still parses for the rare app field that wants an object.
+
+**The ADF converter got its own module, and an inverse.** `markdownToAdf` lived
+in `jira.ts`, which imports `fs`, so `jira-meta.ts` (imported by the renderer)
+could not use it. It is now `jira-adf.ts`, beside `adfToMarkdown`, which
+the settings panel needs to show a stored paragraph as editable text.
+`adfToMarkdown` builds the description grammar's blocks and hands them to
+`serializeDescription`, so the grammar still has one home. Whatever
+`markdownToAdf` writes reads back byte for byte, which a test holds. ADF
+written in Jira with more than the grammar knows (mentions, panels) arrives as
+its words rather than vanishing.
+
+**The category's custom field is shaped too.** Category could only be mapped to
+a text field, and still can. Shaping it means the panel could later offer a
+select there and the push would send `{ id }`, not a bare string Jira refuses.
+
+**Drifted items are held back from the app's push.** Reviewing the build
+against the plan found that an item edited after its push was drafted as a
+*new* issue, with a warning. The plan said it should be listed as *update not
+supported yet* and never re-created. A duplicate in a tracker a whole team
+reads is the expensive mistake, so `buildPushPlan` takes `holdDrifted`. The
+app's push sets it, and such an item is listed as not sent, naming the Jira key
+to update by hand. The CSV export and the MCP planner keep the warning, because
+a person reads their output before anything reaches Jira.
+
+**Blank is blank.** An extra field holding `""` or `[]` used to be sent as
+that, and counted as filling a required field. Now it sends nothing and fills
+nothing, so a required field left blank in Settings is still a gap.
+
+Also added: `searchUsers`, the general user search, for people fields that are
+not the assignee. The assignable search answers "who may be assigned here",
+which is the wrong question for a reviewer.
+
+**Split between the two sessions.** This is the core half. The editors are the
+Project Lead session's half: a paragraph box, two selects for cascading, a
+people picker, comma lists, and *Edit as JSON* only as an explicit toggle on
+`raw`. That half also covers no Rank in the add list, `holdDrifted` wired in
+main, and three gaps the review found: the 429 wait shown in the pane, Jira's
+field errors named rather than given as ids, and *Push to Jira…* in the command
+palette.
+
+18 new tests (14 in `jira-shape.test.ts`, 4 in `jira-push-plan.test.ts`), and
+the kind table updated: Team and Sprint are no longer `raw`. Two mutations were tried to prove the planner tests
+can fail: skipping the shaped assignment, and ignoring `holdDrifted`. Each
+failed its test. 381 unit tests green, root typecheck clean, and the
+`jira-push`, `jira-mapping` and `jira-push-pane` e2e specs pass unchanged
+against the fake Jira. **Not verified:** the shapes for Team and Sprint on a
+real site, and whether `user/search` answers for a scoped token's scopes.

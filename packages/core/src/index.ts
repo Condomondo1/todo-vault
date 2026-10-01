@@ -61,6 +61,8 @@ export {
   jiraMapPath,
   loadJiraMap,
   writeJiraMap,
+  adfToMarkdown,
+  isAdfDoc,
   markdownToAdf,
   selectPushable,
   toJiraCsv,
@@ -105,6 +107,8 @@ export {
   issueTypeNamed,
   requiredGaps,
   searchAssignable,
+  searchUsers,
+  shapeFieldValue,
   valueKindFor,
 } from "./jira-meta.js";
 export type {
@@ -114,6 +118,8 @@ export type {
   JiraFieldSchema,
   JiraUser,
   ProjectMeta,
+  ShapeContext,
+  ShapedValue,
 } from "./jira-meta.js";
 export type {
   JiraMap,
