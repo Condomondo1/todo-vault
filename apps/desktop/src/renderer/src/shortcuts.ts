@@ -61,7 +61,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { keys: ["Shift", "N"], label: "Jot a scratch note, from any view", group: "Items" },
   { keys: ["c"], label: "Focus the capture box (Scratch)", group: "Items" },
   { keys: ["x"], label: "Delete the selected item, or remove the selected note (Scratch)", group: "Items" },
-  { keys: ["e"], label: "Edit the selected item's summary", group: "Items" },
+  { keys: ["e"], label: "Edit the selected item's summary, or the selected note (Scratch)", group: "Items" },
 
   { keys: ["t"], label: "Trash", group: "Vault" },
   { keys: ["r"], label: "Reload from disk", group: "Vault" },

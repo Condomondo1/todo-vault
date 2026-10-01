@@ -93,6 +93,8 @@ export interface VaultState {
    */
   addScratch: (text: string) => Promise<{ error: string | null; note: ScratchNote | null }>;
   /** Trash a note and offer Undo. Resolves to an error message, or null. */
+  /** Replace a note's text. Same resolve as addScratch. */
+  updateScratch: (id: string, text: string) => Promise<{ error: string | null; note: ScratchNote | null }>;
   removeScratch: (id: string) => Promise<string | null>;
   /** Put a trashed note back, by the filename removeScratch reported. */
   restoreScratch: (file: string) => Promise<{ error: string | null; note: ScratchNote | null }>;
@@ -357,6 +359,22 @@ export function useVault(): VaultState {
     }
   }, []);
 
+  const updateScratch = useCallback<VaultState["updateScratch"]>(async (id, text) => {
+    setBusy(true);
+    try {
+      const result = await window.vault.updateScratch(id, text);
+      if (!result.ok) return { error: result.message, note: null };
+      generation.current += 1;
+      setError(null);
+      setSnapshot(result.value.snapshot);
+      return { error: null, note: result.value.note };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err), note: null };
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   const removeScratch = useCallback<VaultState["removeScratch"]>(async (id) => {
     setBusy(true);
     try {
@@ -445,6 +463,7 @@ export function useVault(): VaultState {
       attachPaths,
       restore,
       addScratch,
+      updateScratch,
       removeScratch,
       restoreScratch,
       promoteScratch,
@@ -468,6 +487,7 @@ export function useVault(): VaultState {
       attachPaths,
       restore,
       addScratch,
+      updateScratch,
       removeScratch,
       restoreScratch,
       promoteScratch,

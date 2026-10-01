@@ -479,6 +479,10 @@ export class VaultService extends EventEmitter {
     return this.write((v) => v.addScratch(text));
   }
 
+  updateScratch(id: string, text: string): Promise<ScratchNote> {
+    return this.write((v) => v.updateScratch(id, text));
+  }
+
   removeScratch(id: string): Promise<RemoveScratchResult> {
     return this.write((v) => v.removeScratch(id));
   }

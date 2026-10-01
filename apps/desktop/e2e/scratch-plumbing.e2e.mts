@@ -153,4 +153,30 @@ describe("scratch notes reach the renderer", { concurrency: 1 }, () => {
     const onDisk = await fs.readdir(path.join(harness.vaultRoot, "scratch"));
     assert.ok(onDisk.includes(`${result.id}.md`));
   });
+
+  test("update replaces a note's text in place, and is refused once the note is gone", async () => {
+    const result = await harness.page.evaluate(async () => {
+      const { vault } = window as unknown as Bridge;
+      const added = await vault.addScratch("before the edit");
+      if (!added.ok) throw new Error(added.message);
+      const updated = await vault.updateScratch(added.value.note.id, "after the edit");
+      if (!updated.ok) throw new Error(updated.message);
+      const removed = await vault.removeScratch(added.value.note.id);
+      if (!removed.ok) throw new Error(removed.message);
+      const late = await vault.updateScratch(added.value.note.id, "too late");
+
+      return {
+        added: added.value.note,
+        note: updated.value.note,
+        inSnapshot: updated.value.snapshot.scratch.find((n) => n.id === added.value.note.id)?.text ?? null,
+        lateRefused: late.ok ? null : late.message,
+      };
+    });
+
+    assert.equal(result.note.id, result.added.id);
+    assert.equal(result.note.created, result.added.created, "keeps its place in the list");
+    assert.equal(result.note.text, "after the edit");
+    assert.equal(result.inSnapshot, "after the edit", "and the snapshot answering it already has it");
+    assert.match(result.lateRefused ?? "", /^No scratch note/);
+  });
 });
