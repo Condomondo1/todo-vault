@@ -285,6 +285,17 @@ export interface PushSelection {
  * exist. The CSV export and the MCP planner keep the old behaviour, a warning,
  * since a person reads their output before anything reaches Jira.
  */
+/**
+ * Pushed before, and different now. The hash decides, not the label:
+ * updateItem only ever moves pushed -> drifted and never back, so an item that
+ * was edited and then reverted still reads `drifted` while matching what Jira
+ * holds.
+ */
+export function changedSincePush(item: Item): boolean {
+  if (item.sync.state !== "pushed" && item.sync.state !== "drifted") return false;
+  return Boolean(item.sync.contentHash) && contentHash(pushableFields(item)) !== item.sync.contentHash;
+}
+
 export function selectPushable(items: Item[], options: { holdDrifted?: boolean } = {}): PushSelection {
   const warnings: string[] = [];
   const skipped: Array<{ localKey: string; reason: string }> = [];
@@ -294,12 +305,7 @@ export function selectPushable(items: Item[], options: { holdDrifted?: boolean }
     // here. Checking only `pushed` let a drifted item fall through with no skip
     // and no warning, drafted as a brand-new issue for work Jira already had.
     if (item.sync.state === "pushed" || item.sync.state === "drifted") {
-      // The hash decides, not the label. updateItem only ever moves
-      // pushed -> drifted and never back, so an item that was edited and then
-      // reverted still reads `drifted` while matching what Jira holds.
-      const changed =
-        item.sync.contentHash && contentHash(pushableFields(item)) !== item.sync.contentHash;
-      if (!changed) {
+      if (!changedSincePush(item)) {
         skipped.push({
           localKey: item.key,
           reason: `Already pushed as ${item.sync.jiraKey} and unchanged since`,
@@ -309,7 +315,7 @@ export function selectPushable(items: Item[], options: { holdDrifted?: boolean }
       if (options.holdDrifted) {
         skipped.push({
           localKey: item.key,
-          reason: `Changed since it was pushed as ${item.sync.jiraKey}. Updating an existing issue is not supported yet, so it is not sent again. Update ${item.sync.jiraKey} in Jira by hand.`,
+          reason: `Changed since it was pushed as ${item.sync.jiraKey}, so it is updated there rather than created again.`,
         });
         return false;
       }
@@ -505,6 +511,64 @@ function isBlank(value: unknown): boolean {
   return Array.isArray(value) && value.length === 0;
 }
 
+/**
+ * What an item itself puts into a Jira issue: summary, description, priority,
+ * labels and category, components, assignee, dates and estimate. Not `parent`,
+ * which needs the batch to resolve, and not extra fields, which are the map's.
+ *
+ * One function for a create and an update, so the two cannot disagree about
+ * what an item sends. `typed` names the fields whose value a person wrote and
+ * the screen check shapes into Jira's form (today, a category custom field).
+ */
+function itemFields(
+  item: Item,
+  map: JiraMap,
+  vault: Vault,
+  warnings: string[],
+  grouped: GroupedWarnings,
+): { fields: Record<string, unknown>; typed: string[] } {
+  const fields: Record<string, unknown> = {
+    summary: item.summary,
+    description: markdownToAdf(buildDescription(item, vault)),
+  };
+  const typed: string[] = [];
+
+  const priority = map.priorities[item.priority];
+  if (priority) fields.priority = { name: priority };
+
+  const category = resolveCategory(item, map);
+  if (category.labels.length) fields.labels = category.labels;
+  if (category.customField) {
+    fields[category.customField[0]] = category.customField[1];
+    typed.push(category.customField[0]);
+  }
+  if (item.components.length) {
+    fields.components = item.components.map((name) => ({ name }));
+  }
+  if (item.assignee) {
+    // Jira Cloud identifies people by account id and has refused `{ name }`
+    // since 2019, so a name with no account is left unassigned and said so,
+    // rather than sent and refused.
+    const account = accountFor(map, item.assignee);
+    if (account) fields.assignee = account;
+    else {
+      grouped.add(
+        `"${item.assignee}" has no Jira account in jira-map.yaml's people, so these are created unassigned`,
+        item.key,
+      );
+    }
+  }
+  if (item.dueDate) fields.duedate = item.dueDate;
+
+  const startDate = resolveStartDate(item, map);
+  if (startDate.warning) warnings.push(startDate.warning);
+  if (startDate.fieldId) fields[startDate.fieldId] = startDate.value;
+  if (item.estimate !== undefined && map.fields.estimate) {
+    fields[map.fields.estimate] = item.estimate;
+  }
+  return { fields, typed };
+}
+
 export function buildPushPlan(
   items: Item[],
   map: JiraMap,
@@ -544,43 +608,10 @@ export function buildPushPlan(
     Object.assign(fields, {
       project: { key: map.jiraProjectKey },
       issuetype: { name: issueType },
-      summary: item.summary,
-      description: markdownToAdf(buildDescription(item, vault)),
     });
-
-    const priority = map.priorities[item.priority];
-    if (priority) fields.priority = { name: priority };
-
-    const category = resolveCategory(item, map);
-    if (category.labels.length) fields.labels = category.labels;
-    if (category.customField) {
-      fields[category.customField[0]] = category.customField[1];
-      typed.add(category.customField[0]);
-    }
-    if (item.components.length) {
-      fields.components = item.components.map((name) => ({ name }));
-    }
-    if (item.assignee) {
-      // Jira Cloud identifies people by account id and has refused `{ name }`
-      // since 2019, so a name with no account is left unassigned and said so,
-      // rather than sent and refused.
-      const account = accountFor(map, item.assignee);
-      if (account) fields.assignee = account;
-      else {
-        grouped.add(
-          `"${item.assignee}" has no Jira account in jira-map.yaml's people, so these are created unassigned`,
-          item.key,
-        );
-      }
-    }
-    if (item.dueDate) fields.duedate = item.dueDate;
-
-    const startDate = resolveStartDate(item, map);
-    if (startDate.warning) warnings.push(startDate.warning);
-    if (startDate.fieldId) fields[startDate.fieldId] = startDate.value;
-    if (item.estimate !== undefined && map.fields.estimate) {
-      fields[map.fields.estimate] = item.estimate;
-    }
+    const own = itemFields(item, map, vault, warnings, grouped);
+    Object.assign(fields, own.fields);
+    for (const id of own.typed) typed.add(id);
 
     const draft: JiraIssueDraft = { localKey: item.key, issueType, fields };
 
@@ -612,6 +643,92 @@ export function buildPushPlan(
 
   grouped.into(warnings);
   return { jiraProjectKey: map.jiraProjectKey, drafts, attachments, skipped, warnings, blockers };
+}
+
+// ------------------------------------------------------------- updates
+
+/** An issue already in Jira whose vault item has changed since its push. */
+export interface JiraIssueUpdate {
+  localKey: string;
+  jiraKey: string;
+  /** Carried so the restamp after the update keeps it: `markPushed` drops what it is not given. */
+  jiraId?: string;
+  /** The Jira issue type the map gives this item's type, to hold against the issue's own. */
+  issueType: string;
+  /**
+   * The vault's side, built exactly as a create builds it, but only from the
+   * item itself. A field the item no longer has is `null` (or `[]` for a
+   * list), so the diff can say it was cleared. Extra fields are left out: they
+   * are the map's, set once at create, and an update is about what changed in
+   * the item.
+   */
+  fields: Record<string, unknown>;
+  /** Fields whose value a person typed, to be shaped against the edit screen. */
+  typed: string[];
+}
+
+export interface JiraUpdatePlan {
+  updates: JiraIssueUpdate[];
+  warnings: string[];
+}
+
+/**
+ * The updates for items changed since their push: the other half of
+ * `holdDrifted`, which keeps those items out of the create.
+ *
+ * Pure, like `buildPushPlan`. What Jira holds now is read separately
+ * (`readIssueState`), and `diffIssue` holds the two against each other, so
+ * only fields that actually differ are offered and sent.
+ */
+export function buildUpdatePlan(items: Item[], map: JiraMap, vault: Vault): JiraUpdatePlan {
+  const warnings: string[] = [];
+  const grouped = new GroupedWarnings();
+  const selected = new Map(items.map((i) => [i.key, i]));
+  const updates: JiraIssueUpdate[] = [];
+
+  for (const item of items) {
+    if (!changedSincePush(item) || !item.sync.jiraKey) continue;
+    const own = itemFields(item, map, vault, warnings, grouped);
+    const fields = own.fields;
+
+    // What the item could carry under this map and no longer does is cleared,
+    // so removing a due date in the vault removes it in Jira. Two exceptions:
+    // priority, which Jira never leaves empty, and an assignee the map cannot
+    // name, which stays as Jira has it rather than being unassigned by accident.
+    if (!("labels" in fields)) fields.labels = [];
+    if (!("components" in fields)) fields.components = [];
+    if (!item.assignee) fields.assignee = null;
+    if (!("duedate" in fields)) fields.duedate = null;
+    for (const id of [map.fields.startDate, map.fields.estimate]) {
+      if (id && !(id in fields)) fields[id] = null;
+    }
+    if (map.fields.category !== "labels" && !(map.fields.category in fields)) fields[map.fields.category] = null;
+
+    if (item.parent) {
+      const parentKey = (selected.get(item.parent) ?? safeGet(vault, item.parent))?.sync.jiraKey;
+      if (parentKey) fields.parent = { key: parentKey };
+      else {
+        grouped.add(
+          `The parent ${item.parent} is not in Jira yet, so the parent is left as Jira has it. Push the parent first`,
+          item.key,
+        );
+      }
+    } else {
+      fields.parent = null;
+    }
+
+    updates.push({
+      localKey: item.key,
+      jiraKey: item.sync.jiraKey,
+      ...(item.sync.jiraId ? { jiraId: item.sync.jiraId } : {}),
+      issueType: map.issueTypes[item.type],
+      fields,
+      typed: own.typed,
+    });
+  }
+
+  grouped.into(warnings);
+  return { updates, warnings };
 }
 
 /**

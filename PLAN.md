@@ -4647,3 +4647,91 @@ notice. Convert gives a Team row on Epic, Story and Task with Platform
 selected, and the file is unchanged until Save. After Save, the file has the
 extra field, `defaults: {}`, and a clean commit. **Not driven:** the *on none of
 the chosen types* note.
+## An issue changed since its push is updated, field by field ✅ built (core half; Jira push, slice D1)
+
+Slice D's first item, re-planned after the push had been used against a real
+project, as `plans/PLAN-jira-push.md` asked. Until now an item edited after its
+push was either created a second time (the old behaviour) or held back with
+*update it in Jira by hand* (`holdDrifted`, earlier today). The issue in Jira
+went stale, and the item read as `drifted` forever.
+
+**Read Jira first, because the vault does not know what it sent.** The push
+stamps a content hash, not the values, so the vault can say *something
+changed* but not *what Jira holds*. Jira may also have been edited since,
+by anyone. So an update reads the issue
+(`GET /issue/{key}?fields=…`), sets it beside what the vault would send, and
+offers only the fields that differ. Nothing is sent that was not shown. Storing
+a snapshot of every pushed payload in the item would have avoided the read, but
+it would still be wrong the moment someone edited the issue in Jira, and that
+is exactly the case worth seeing.
+
+**Four pieces, so the pane can stand between them.**
+- `buildUpdatePlan` (in `jira.ts`, beside `buildPushPlan`): pure. It builds the
+  vault's side for each item changed since its push. `itemFields` was pulled out
+  of `buildPushPlan` for this, so a create and an update cannot disagree about
+  what an item sends. `changedSincePush` is likewise the one test both paths
+  use.
+- `readIssueState`: the issue's current values, and its **edit** screen
+  (`/editmeta`), which is its own list. A field can be settable at create and
+  locked afterwards.
+- `diffIssue`: pure. One `JiraFieldChange` per differing field, with Jira's
+  value and the vault's as a person reads them, whether Jira will take the
+  change, and why not when it will not.
+- `sendUpdates`: one `PUT` per issue with only the chosen fields, then a
+  restamp.
+
+**What counts as the same.** Jira hands values back fuller than it takes them,
+so the comparison is driven by the vault's side:
+- `{ name: "High" }` matches `{ id: "2", name: "high", iconUrl: … }`
+- labels match in any order
+- rich text is compared as the markdown it reads as (`adfToMarkdown`), because
+  Jira adds ids and attributes to stored ADF
+
+A test feeds Jira's fuller shapes for every vault field and expects no changes.
+Making the comparison a plain `===` fails three tests.
+
+**What the item no longer has is cleared, with two exceptions.** A due date
+removed in the vault is sent as `null`, so it is removed in Jira, and a list
+emptied is sent as `[]`. The exceptions:
+- Priority, which Jira never leaves empty.
+- An assignee whose name has no account in `people`. That is left as Jira has
+  it, because "the map does not know this person" is not an instruction to
+  unassign.
+
+Removing a parent is shown but cannot be chosen. That is done in Jira. A
+changed issue type is a warning, since an update cannot move an issue.
+
+**Extra fields are not updated.** They are the map's, set once at create, and
+an update is about what changed in the item. Updating them would also re-send a
+Team or a Sprint someone deliberately changed in Jira.
+
+**The restamp follows the person's choice, not the field count.** After an
+update lands, the item is stamped as pushed, even if some differing fields were
+left unticked. Keeping Jira's value for a field is a decision. Without the
+stamp the item would read as changed forever, and the same field would be
+offered at every push. An item whose diff is empty, because someone already
+made the change in Jira, is restamped with no request at all. That is how a
+`drifted` label finally heals.
+
+**No journal.** The create journals each attempt because a dropped connection
+leaves a duplicate possible. A `PUT` repeated leaves the issue as one would, so
+a dropped update says sending it again is safe, and nothing is held back.
+
+**The other half is the pane's.** The Project Lead session will add a *Changed
+since pushed* section to the push pane, with a row per field reading *Jira now
+→ vault*, a checkbox each, and *Create N and update M*.
+
+11 tests in `jira-update.test.ts`:
+- planning: only changed items, carrying `jiraId`, no extra fields, and the
+  clearing rules
+- the diff: Jira's fuller shapes, readable rows, non-editable reasons, a typed
+  category shaped against the edit screen, a type change
+- the read, against the fake `fetch`
+- the send: only chosen fields, empty means restamp only, a refused update is
+  not stamped, a dropped one says a retry is safe
+- a round trip through a real `Vault`, after which nothing is offered
+
+400 unit tests green (221 core), root typecheck clean. The `jira-push`, `jira-push-pane`
+and `jira-mapping` e2e specs pass. **Not verified:** a real site's `editmeta`
+and the shapes it hands back, notably whether `parent` appears on a
+team-managed project's edit screen.
