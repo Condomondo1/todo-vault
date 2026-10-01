@@ -1435,21 +1435,56 @@ export class Vault {
    * matters for a pasted YAML or Python snippet.
    */
   async addScratch(rawText: string): Promise<ScratchNote> {
-    const text = normalizeScratchText(rawText);
-    if (!text) throw new VaultError("A scratch note needs some text");
-    if (text.length > SCRATCH_MAX_CHARS) {
-      throw new VaultError(
-        `That note is ${text.length.toLocaleString("en")} characters; the limit is ${SCRATCH_MAX_CHARS.toLocaleString("en")}. ` +
-          "Attach a file to an item for anything that size.",
-      );
-    }
-
+    const text = checkScratchText(rawText);
     const note: ScratchNote = { id: randomUUID(), created: nowIso(), text };
     // Exclusive, though a UUID collision is not a real risk: the point is that
     // this write can never replace a file, whatever is already there.
     await createFileExclusive(this.scratchPath(note.id), serializeScratch(note));
     await this.commit("Add scratch note");
     return note;
+  }
+
+  /**
+   * Replace a note's text, keeping its id, its `created` and its place in the
+   * list. The text is cleaned and limited exactly as an add's is.
+   *
+   * Only the body is rewritten. The frontmatter is carried over as written, so a
+   * field from a newer version survives an edit from an older one.
+   *
+   * Committed as `Edit scratch note`, once per call: the caller saves when the
+   * person is done, not per keystroke. An edit cannot skip the commit, since
+   * `commit()` stages everything and the change would land in the next one.
+   * Saving unchanged text writes and commits nothing.
+   *
+   * A note removed between the read and the write comes back with the new
+   * text: a duplicate of what is in the trash, never a lost edit.
+   */
+  async updateScratch(id: string, rawText: string): Promise<ScratchNote> {
+    assertScratchId(id);
+    const text = checkScratchText(rawText);
+    const filePath = this.scratchPath(id);
+
+    let raw: string;
+    try {
+      raw = await fs.readFile(filePath, "utf8");
+    } catch (err) {
+      if (hasErrorCode(err, "ENOENT")) throw new VaultError(`No scratch note ${id}`);
+      throw err;
+    }
+    let note: ScratchNote;
+    try {
+      note = parseScratch(raw, id);
+    } catch (err) {
+      throw new VaultError(`Scratch note ${id} no longer reads as a note: ${formatZodError(err)}`);
+    }
+    if (note.text === text) return note;
+
+    // parseScratch has already proved the block is there and closed.
+    const normalized = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+    const head = normalized.slice(0, normalized.indexOf("\n---", 3) + 4);
+    await writeFileAtomic(filePath, `${head}\n\n${text}\n`);
+    await this.commit("Edit scratch note");
+    return { ...note, text };
   }
 
   /** Move a note to `.trash/scratch/`. Recoverable with restoreScratch. */
@@ -2643,6 +2678,19 @@ function serializeScratch(note: ScratchNote): string {
 
 function normalizeScratchText(text: string): string {
   return text.replace(/\r\n?/g, "\n").replace(/^(?:[ \t]*\n)+/, "").trimEnd();
+}
+
+/** Normalized text, or the refusal an add and an edit share. */
+function checkScratchText(rawText: string): string {
+  const text = normalizeScratchText(rawText);
+  if (!text) throw new VaultError("A scratch note needs some text");
+  if (text.length > SCRATCH_MAX_CHARS) {
+    throw new VaultError(
+      `That note is ${text.length.toLocaleString("en")} characters; the limit is ${SCRATCH_MAX_CHARS.toLocaleString("en")}. ` +
+        "Attach a file to an item for anything that size.",
+    );
+  }
+  return text;
 }
 
 function firstLine(text: string): string | undefined {
