@@ -230,7 +230,7 @@ test("only the chosen fields are sent, and each item is restamped as it lands", 
   assert.equal(fake.requests[0].method, "PUT");
   assert.deepEqual(fake.requests[0].body, { fields: { summary: "New" } });
   assert.deepEqual(stamped, ["ACME-1->ENG-7:10070", "ACME-2->ENG-8:-"]);
-  assert.deepEqual(outcome.updated.map((u) => [u.jiraKey, u.fields]), [["ENG-7", ["summary"]], ["ENG-8", []]]);
+  assert.deepEqual(outcome.updated.map((u) => [u.jiraKey, u.fields, u.restamped]), [["ENG-7", ["summary"], true], ["ENG-8", [], true]]);
   assert.equal(outcome.updated[0].url, `${SITE}/browse/ENG-7`);
 });
 
@@ -276,4 +276,17 @@ test("after the update lands, the item is no longer offered", async () => {
 
   assert.deepEqual(buildUpdatePlan(await items(vault), m, vault).updates, []);
   assert.equal(vault.getItem(item.key).sync.jiraId, "10070", "the restamp kept the id");
+});
+
+test("restamp: false sends the chosen fields and leaves the item reading as changed", async () => {
+  const { fake, client } = jira({ status: 204 });
+  const stamped: string[] = [];
+  const outcome = await sendUpdates(
+    client,
+    [{ localKey: "ACME-1", jiraKey: "ENG-7", fields: { summary: "New" }, restamp: false }],
+    { markPushed: async (local) => void stamped.push(local) },
+  );
+  assert.deepEqual(fake.requests[0].body, { fields: { summary: "New" } });
+  assert.deepEqual(stamped, [], "a difference nobody decided about is not buried by a stamp");
+  assert.equal(outcome.updated[0].restamped, false);
 });
