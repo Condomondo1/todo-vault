@@ -8,6 +8,58 @@ for the shape of one of those).
 Newest at the top. No status tracking here — once something's picked up, its
 entry moves out to wherever it's being built.
 
+## Scratch notes should be editable after they are saved
+
+Reported from use on 2026-10-01. A note cannot be changed once it is on the
+pad; fixing a typo means removing it and adding it again.
+
+**History.** The ask was that edits need not be kept in git. They cannot simply
+skip the commit: `commit()` runs `git add -A`, so an uncommitted edit would be
+swept into the next unrelated commit under its subject. The choice is one
+`Edit scratch note` commit per saved edit (not per keystroke), as add, remove
+and restore already do, or ignoring `scratch/` in the vault's `.gitignore`,
+which untracks existing notes and breaks the server's "every write is committed"
+promise. The first is recommended.
+
+**Shape.** Core gets `updateScratch(id, text)`, reusing `assertScratchId`,
+`normalizeScratchText` and `SCRATCH_MAX_CHARS`, overwriting the one file and
+committing. One IPC channel (`scratch:update`) through preload and
+`shared/api.ts`. On `ScratchPage.tsx` a card's rendered Markdown swaps for a
+textarea on double-click or a key (check `shortcuts.ts` for a free one, since
+the page swallows item keys); Ctrl+Enter or blur saves, Escape cancels. The
+sidebar needs nothing, since its rows open the page. No MCP tool is needed;
+Claude can remove and re-add.
+
+**Already safe.** `PromotePanel` prefills only when the note id changes, so an
+edit will not clobber a typed summary, and its origin text and Claude draft
+read the live `note.text`. Notes sort by `created`, so an edited note keeps its
+place; an `updated` field would be a schema change and is not needed.
+
+**Edge.** A note removed or promoted (by Claude, say) while it is being edited
+fails the save with *No scratch note*. Keep the text in the box and offer to
+save it as a new note rather than lose it.
+
+## The sidebar's scratch box should clear after an add, and say so
+
+Reported from use on 2026-10-01. In the sidebar's Scratch section, *+ new*
+opens a box, and pressing Ctrl+Enter in it creates a note each time but leaves
+the text in the box. Nothing visible changes beyond the count and the list
+under it, so it reads as though the note was not made, and pressing again makes
+a duplicate.
+
+What it should do: once a note is saved, empty the box (keep it open and
+focused for the next one) and show a toast such as *Note added to Scratch*. A
+second identical press then has nothing to save.
+
+Where to start: `ScratchSection.tsx`. Its `onKeyDown` handles plain Enter
+only, and deliberately lets Ctrl and Meta+Enter through, and its `submit`
+already clears the draft on success. So the Ctrl+Enter that adds a note is
+reaching some other handler, likely a window-level shortcut, that saves the
+text without going through `submit`. Find that path first, then either route
+it through `submit` or have it clear the draft too. `ScratchPage.tsx` has the
+same Enter guard, so check whether the page's box behaves the same way. The
+Undo toast a remove already shows is the shape to copy for the confirmation.
+
 ## The ✕ should ask before it throws away an unsent comment
 
 A click beside the open item no longer closes it while a comment is typed and
