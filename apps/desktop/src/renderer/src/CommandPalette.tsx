@@ -3,6 +3,15 @@ import type { Item } from "todo-vault";
 import type { ProjectSummary } from "@shared/api";
 import { StatusPill, isClosed } from "./pieces";
 
+/** A command the palette offers above its search results. */
+export interface PaletteAction {
+  id: string;
+  label: string;
+  /** What it will act on, shown at the row's right. */
+  meta: string;
+  run: () => void;
+}
+
 /**
  * Ctrl-K: search the whole vault.
  *
@@ -15,10 +24,16 @@ import { StatusPill, isClosed } from "./pieces";
  * items a substring pass is instant, and it is predictable — a fuzzy ranker that
  * surprises you is worse than one that occasionally makes you type another word.
  * Multiple words are ANDed, so a second word always narrows.
+ *
+ * A few actions sit above the results, matched by the same words. They act on
+ * what the window already has in hand — the checked rows, else the open item —
+ * so the palette never asks which items, and an action with nothing to act on
+ * is not offered.
  */
 export function CommandPalette({
   items,
   projects,
+  actions = [],
   onClose,
   onSelectItem,
   onSelectProject,
@@ -26,6 +41,7 @@ export function CommandPalette({
   /** The whole snapshot — deliberately unfiltered. */
   items: Item[];
   projects: ProjectSummary[];
+  actions?: PaletteAction[];
   onClose: () => void;
   /** Opens the item detail panel. The palette closes itself after calling this. */
   onSelectItem: (key: string) => void;
@@ -86,12 +102,19 @@ export function CommandPalette({
     };
   }, [items, terms]);
 
+  const actionRows = useMemo(
+    () => actions.filter((a) => terms.every((term) => a.label.toLowerCase().includes(term))),
+    [actions, terms],
+  );
+
   type Row =
+    | { kind: "action"; id: string; action: PaletteAction }
     | { kind: "project"; id: string; project: ProjectSummary }
     | { kind: "item"; id: string; item: Item; snippet: string | null };
 
   const rows = useMemo<Row[]>(
     () => [
+      ...actionRows.map((action) => ({ kind: "action" as const, id: `a:${action.id}`, action })),
       ...projectRows.map((project) => ({
         kind: "project" as const,
         id: `p:${project.key}`,
@@ -104,7 +127,7 @@ export function CommandPalette({
         snippet: text,
       })),
     ],
-    [projectRows, itemRows],
+    [actionRows, projectRows, itemRows],
   );
 
   useEffect(() => setCursor(0), [query]);
@@ -116,7 +139,8 @@ export function CommandPalette({
   }, [cursor, rows]);
 
   const activate = (row: Row): void => {
-    if (row.kind === "project") onSelectProject(row.project.key);
+    if (row.kind === "action") row.action.run();
+    else if (row.kind === "project") onSelectProject(row.project.key);
     else onSelectItem(row.item.key);
     onClose();
   };
@@ -146,7 +170,7 @@ export function CommandPalette({
     }
   };
 
-  const firstItemAt = projectRows.length;
+  const firstItemAt = actionRows.length + projectRows.length;
 
   return (
     <div className="palette-backdrop" onClick={onClose}>
@@ -166,13 +190,19 @@ export function CommandPalette({
             <div className="palette-empty">Nothing matches “{query}”.</div>
           )}
 
-          {projectRows.length > 0 && <div className="palette-group">Projects</div>}
+          {actionRows.length > 0 && <div className="palette-group">Actions</div>}
 
           {rows.map((row, index) => {
             const active = index === cursor;
 
             // The heading sits between the two blocks, so it renders with the
             // first item row rather than as a separate pass over the list.
+            const projectsHeading =
+              row.kind === "project" && index === actionRows.length ? (
+                <div className="palette-group" key="projects-heading">
+                  Projects
+                </div>
+              ) : null;
             const heading =
               row.kind === "item" && index === firstItemAt ? (
                 <div className="palette-group" key="items-heading">
@@ -187,6 +217,7 @@ export function CommandPalette({
 
             return (
               <div key={row.id}>
+                {projectsHeading}
                 {heading}
                 <button
                   type="button"
@@ -195,7 +226,16 @@ export function CommandPalette({
                   onMouseMove={() => setCursor(index)}
                   onClick={() => activate(row)}
                 >
-                  {row.kind === "project" ? (
+                  {row.kind === "action" ? (
+                    <>
+                      <span className="palette-summary">
+                        <span className="palette-title">
+                          <Highlight text={row.action.label} terms={terms} />
+                        </span>
+                      </span>
+                      <span className="palette-meta">{row.action.meta}</span>
+                    </>
+                  ) : row.kind === "project" ? (
                     <>
                       <span className="cell-key">{row.project.key}</span>
                       <span className="palette-summary">

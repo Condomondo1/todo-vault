@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { JiraDraftView, JiraPushOutcome, JiraPushPreview, JiraPushProgress } from "@shared/api";
 
+/** Progress about one item; the push's own "slowed down" has no item. */
+type ItemProgress = Extract<JiraPushProgress, { localKey: string }>;
+
 import { JiraValueField } from "./JiraValueField";
 
 /**
@@ -30,7 +33,10 @@ export function JiraPush({
   const [askValues, setAskValues] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
   const [pushing, setPushing] = useState(false);
-  const [progress, setProgress] = useState<Record<string, JiraPushProgress>>({});
+  const [progress, setProgress] = useState<Record<string, ItemProgress>>({});
+  /** When Jira's 429 wait ends, so the pane can count down rather than look hung. */
+  const [resumesAt, setResumesAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [outcome, setOutcome] = useState<JiraPushOutcome | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [showJson, setShowJson] = useState<ReadonlySet<string>>(() => new Set());
@@ -64,7 +70,15 @@ export function JiraPush({
   const push = async (): Promise<void> => {
     setPushing(true);
     setProgress({});
-    const stop = window.vault.onJiraPushProgress((p) => setProgress((cur) => ({ ...cur, [p.localKey]: p })));
+    const stop = window.vault.onJiraPushProgress((p) => {
+      if (p.state === "slowedDown") {
+        setNow(Date.now());
+        setResumesAt(Date.now() + p.waitMs);
+        return;
+      }
+      setResumesAt(null);
+      setProgress((cur) => ({ ...cur, [p.localKey]: p }));
+    });
     try {
       const result = await window.vault.jiraPush(keys, askValues);
       if (result.ok) setOutcome(result.value);
@@ -72,8 +86,16 @@ export function JiraPush({
     } finally {
       stop();
       setPushing(false);
+      setResumesAt(null);
     }
   };
+
+  // A once-a-second tick while Jira has asked us to wait, for the countdown.
+  useEffect(() => {
+    if (resumesAt === null) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [resumesAt]);
 
   const toggle = (set: ReadonlySet<string>, key: string): Set<string> => {
     const next = new Set(set);
@@ -106,6 +128,11 @@ export function JiraPush({
         <div className="modal-body">
           {!preview && loading && <p className="field-note">Reading the project&rsquo;s create screens…</p>}
           {error && <div className="modal-error">{error}</div>}
+          {resumesAt !== null && (
+            <div className="field-note jira-slowed" role="status">
+              Jira asked us to slow down — resuming in {Math.max(0, Math.ceil((resumesAt - now) / 1000))}s
+            </div>
+          )}
 
           {preview && !outcome && (
             <>
@@ -132,6 +159,7 @@ export function JiraPush({
                     <JiraValueField
                       key={field.fieldId}
                       field={field}
+                      people={preview.people}
                       onChange={(value) => setAskValues((cur) => ({ ...cur, [field.fieldId]: value }))}
                     />
                   ))}
@@ -224,7 +252,7 @@ function DraftRow({
   blocked: boolean;
   open: boolean;
   json: boolean;
-  progress?: JiraPushProgress;
+  progress?: ItemProgress;
   onToggle: () => void;
   onToggleJson: () => void;
 }): React.JSX.Element {
@@ -257,7 +285,7 @@ function DraftRow({
   );
 }
 
-function progressLabel(p: JiraPushProgress): string {
+function progressLabel(p: ItemProgress): string {
   switch (p.state) {
     case "creating":
       return "creating…";

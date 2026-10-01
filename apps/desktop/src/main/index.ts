@@ -9,6 +9,7 @@ import {
   jiraMapPath,
   loadJiraMap,
   searchAssignable,
+  searchUsers,
   type HistoryQuery,
   type Status,
   type TurnOnHistoryOptions,
@@ -552,6 +553,20 @@ function registerHandlers(): void {
     if (!query.trim()) return [];
     const { client } = await openClient(stored);
     const users = await searchAssignable(client, normaliseProjectKey(projectKey), query);
+    return users.map((u) => ({
+      accountId: u.accountId,
+      displayName: u.displayName ?? u.accountId,
+      ...(u.emailAddress ? { emailAddress: u.emailAddress } : {}),
+    }));
+  });
+
+  // The general search, for a user field that is not the assignee: whether
+  // someone may be assigned in the project is not the question for a reviewer.
+  handle(CHANNELS.jiraSearchUsers, async (query: string): Promise<JiraPerson[]> => {
+    const stored = await requireJiraCredential();
+    if (!query.trim()) return [];
+    const { client } = await openClient(stored);
+    const users = await searchUsers(client, query);
     return users.map((u) => ({
       accountId: u.accountId,
       displayName: u.displayName ?? u.accountId,

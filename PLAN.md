@@ -4506,3 +4506,95 @@ failed its test. 381 unit tests green, root typecheck clean, and the
 `jira-push`, `jira-mapping` and `jira-push-pane` e2e specs pass unchanged
 against the fake Jira. **Not verified:** the shapes for Team and Sprint on a
 real site, and whether `user/search` answers for a scoped token's scopes.
+
+## Jira values are typed as a person means them: the editors ✅ built and driven (app half)
+
+The app half of the section above. With `shapeFieldValue` doing the shaping at
+push time, the editor no longer has to produce Jira's JSON. So it stops asking
+for it.
+
+**Every kind has a control, and none of them is a JSON box.** `JiraValueField`
+is still the one editor for both an extra field in Settings → Jira → Mapping
+and an `ask` field in the push pane. Each control stores what a person means:
+- options, priorities, versions and components are the selects and checkboxes
+  they were, storing `{ id }`
+- a paragraph (`richText`) is a textarea of markdown, noted *Formatted like a
+  description*. A paragraph value already stored as ADF opens as its markdown
+  through `adfToMarkdown`, so editing it round-trips
+- a cascading select is two selects, the second listing the children Jira
+  gives under the chosen parent, storing `{ id, child: { id } }`. A hand-typed
+  `Parent / Child` in the map still shows as selected
+- a user or users field is a picker. The map's linked people come first, and
+  anyone else is found through a new `jira:search-users` IPC over the core's
+  `searchUsers`, the site-wide search. It stores `{ accountId }`
+  - A name written by hand in the map is resolved through People the way
+    `shapeUser` resolves it. One that names nobody linked stays text, shown
+    as a dashed chip, and is never wrapped as `{ accountId: "Renee" }`,
+    which Jira would refuse. That keeps the push's lookup and its blocker in
+    play. A comma string reads as several people. OverSeer's review found
+    this.
+- labels, string lists and groups are a comma input
+- sprint is a number input explaining where the id is found, and team is a
+  text input for the team's id
+- a datetime opens an older full-ISO value as the local time it stands for,
+  since a `datetime-local` input shows nothing else
+- `raw` is a plain text input. *Edit as JSON* is the only JSON path in the app,
+  and only that box keeps the *sent exactly as written* note. An object already
+  stored opens in it
+
+**Mistakes show under the field in Settings.** The Mapping tab passes the
+field's create-screen metadata and the map's people, and the editor runs
+`shapeFieldValue` on each change. *Team has no option "Paymnts". Jira offers:
+Payments, Platform.* appears before Save, not only as a push blocker. The push
+pane doesn't repeat it, because its blockers list is already the same check.
+
+**Rank is never offered.** The add list skips `managed` fields. One already in
+a map, written by hand or before this, shows *Jira sets this itself; it is not
+sent* with Remove and no send-mode select.
+
+**The review gaps, closed.**
+- `planFor` passes `holdDrifted: true`, so the app's push lists a drifted item
+  as not sent and never creates it a second time.
+- A 429 is shown. `loadContext` hands the client an `onRateLimit` that becomes
+  a `slowedDown` progress event with no item key. The pane counts it down:
+  *Jira asked us to slow down — resuming in 12s*.
+- Field errors come back named. `namedFieldErrors` (`main/jira-names.ts`, apart
+  from `jira-push.ts` so a test can import it without Electron) rekeys the
+  outcome's `fieldErrors` from ids to the names on that draft's issue type, and
+  renames the same `id: error` lines in the message.
+- *Push to Jira…* is in the command palette, the third entry point the plan
+  named. The palette grew an *Actions* group above its results, matched by the
+  same words. An action acts on what the window already holds: the checked
+  rows, else the open item. With neither, the action isn't offered, so the
+  palette never asks which items.
+
+`main/jira-push.ts`'s private `adfText` is gone in favour of the core's
+`adfToMarkdown`.
+
+**Tests.** 8 unit tests in `test/jira-choices.test.ts` cover the choice
+helpers (cascading lookup by id and by label, people choices, comma lists, the
+datetime reading, hand-written names in a people field) and the error naming. The fake ENG now has, on Story, a
+textarea *Proposed Solution at Onset*, a cascading *Region*, a *Reviewer*
+user field, and *Rank*. It serves the site-wide `user/search`, with an app
+account mixed in that must not be offered. Its `POST /issue` refuses non-ADF
+in the paragraph, unknown ids in the cascade, and any Rank, as Jira does. New
+e2e:
+- Mapping never offers Rank, and stores a typed paragraph as markdown and two
+  selects as `{ id, child }`
+- the Reviewer picker offers Dan, who is linked, then finds Priya through the
+  site search, leaves the app account out, and stores her `{ accountId }`
+- a Rank already in the map shows as not sent, and the paragraph reads back as
+  typed
+- a push of a hand-written map arrives in Jira's shape: `payments` as
+  `{ id: "t2" }`, markdown as ADF with its bold, `Europe / Berlin` as ids, and
+  no Rank
+- the palette opens the pane for the checked rows
+
+A screenshot of the Mapping tab found every note under a value editor
+uppercased like a caption. `.modal-field > span` styled every span in the
+field, which is how the old JSON box's note looked too. It is now
+`:first-child`, the caption only.
+
+The `jira-mapping`, `jira-push` and `jira-push-pane` specs pass. **Not
+verified:** the countdown, which no e2e drives because the fake Jira never
+answers 429.

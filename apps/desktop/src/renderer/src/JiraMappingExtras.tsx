@@ -49,9 +49,13 @@ export function newExtraField(meta: ProjectMeta, chosenTypes: string[], fieldId:
 
 /**
  * The Jira fields the vault has no equivalent for: Team, Fix versions, a
- * sprint. Each has a value in Jira's own shape, drawn by the same editor the
- * push pane uses for `ask` fields, and is either sent on every issue or asked
- * for, prefilled, on each push.
+ * sprint. Each has a value typed as a person means it, drawn by the same
+ * editor the push pane uses for `ask` fields and checked the way the push
+ * will check it, and is either sent on every issue or asked for, prefilled, on
+ * each push.
+ *
+ * Fields Jira keeps for itself, such as Rank, are never offered. One already
+ * in the map says it is not sent, and can be removed.
  */
 export function ExtraFields({
   meta,
@@ -59,6 +63,7 @@ export function ExtraFields({
   mappedFieldIds,
   value,
   onChange,
+  people,
 }: {
   meta: ProjectMeta;
   chosenTypes: string[];
@@ -66,6 +71,8 @@ export function ExtraFields({
   mappedFieldIds: string[];
   value: Record<string, JiraExtraField>;
   onChange: (next: Record<string, JiraExtraField>) => void;
+  /** The map's linked people, for a user field's picker and for checking a typed name. */
+  people: Record<string, JiraPersonLink>;
 }): React.JSX.Element {
   const known = useMemo(() => distinctFields(meta), [meta]);
 
@@ -74,6 +81,7 @@ export function ExtraFields({
     const out: Array<{ field: JiraFieldMeta; on: string[] }> = [];
     for (const field of known) {
       if (PUSH_FILLS.has(field.fieldId) || mappedFieldIds.includes(field.fieldId) || field.fieldId in value) continue;
+      if (valueKindFor(field.schema) === "managed") continue;
       const on = typesWith(meta, chosenTypes, field.fieldId);
       if (on.length) out.push({ field, on });
     }
@@ -102,20 +110,24 @@ export function ExtraFields({
                 fieldId: id,
                 name: spec.name ?? field?.name ?? id,
                 kind,
-                choices: kind === "cascading" ? [] : choicesFor(field?.allowedValues),
+                choices: choicesFor(field?.allowedValues),
                 value: spec.value,
               }}
+              people={people}
+              meta={field}
               onChange={(next) => set(id, { value: next === null ? undefined : next })}
             />
             <div className="jira-extra-meta">
-              <select
-                aria-label={`When to send ${spec.name ?? id}`}
-                value={spec.mode}
-                onChange={(e) => set(id, { mode: e.target.value as JiraExtraField["mode"] })}
-              >
-                <option value="always">Send on every issue</option>
-                <option value="ask">Ask on each push</option>
-              </select>
+              {kind !== "managed" && (
+                <select
+                  aria-label={`When to send ${spec.name ?? id}`}
+                  value={spec.mode}
+                  onChange={(e) => set(id, { mode: e.target.value as JiraExtraField["mode"] })}
+                >
+                  <option value="always">Send on every issue</option>
+                  <option value="ask">Ask on each push</option>
+                </select>
+              )}
               <span className="field-note">
                 {spec.issueTypes?.length ? `On ${spec.issueTypes.join(", ")}` : "On every type"}
                 {!field && " · not on this project's screens"}
