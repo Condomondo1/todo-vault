@@ -116,6 +116,31 @@ describe("editing a scratch note in place", { concurrency: 1 }, () => {
     assert.equal(await edits(), (before += 1));
   });
 
+  test("the promote panel follows an edit where it was untouched, and keeps what was typed", async () => {
+    const id = ids["first note"];
+    const summary = () =>
+      page.locator("aside.promote").locator(`label:has(> span:text-is("Summary"))`).locator("input");
+    const rewrite = async (text: string): Promise<void> => {
+      await card(id).dblclick();
+      await editor().waitFor({ state: "visible" });
+      await page.keyboard.press("Control+A");
+      await page.keyboard.type(text);
+      await page.keyboard.press("Control+Enter");
+      await editor().waitFor({ state: "detached" });
+    };
+
+    await card(id).click();
+    await eventually("the panel to fill", () => summary().inputValue(), (v) => v === "first note, **edited**");
+
+    await rewrite("first note, typo fixed");
+    await eventually("Summary to follow the fix", () => summary().inputValue(), (v) => v === "first note, typo fixed");
+
+    await summary().fill("My own summary");
+    await rewrite("first note, fixed again");
+    await eventually("the note to save", () => textOf(id), (t) => t === "first note, fixed again");
+    assert.equal(await summary().inputValue(), "My own summary", "typed over, so left alone");
+  });
+
   test("a note removed mid-edit keeps the text, and Save as a new note keeps it", async () => {
     const id = ids["third note"];
     await card(id).dblclick();

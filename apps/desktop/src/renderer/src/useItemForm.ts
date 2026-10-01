@@ -90,6 +90,19 @@ export function useItemForm({
     [projects, items],
   );
 
+  /**
+   * Replace some of the fields a note fills, leaving every other field as it is.
+   * For the note's own text changing under the form, where reseed would also
+   * clear what was chosen since, such as a priority or a due date.
+   */
+  const patchText = useCallback(
+    (next: Partial<Pick<ItemFormValues, "type" | "summary" | "description">>) => {
+      setValues((v) => ({ ...v, ...next }));
+      if (next.description !== undefined) setDescriptionGeneration((n) => n + 1);
+    },
+    [],
+  );
+
   return {
     values,
     set,
@@ -97,6 +110,7 @@ export function useItemForm({
     descriptionGeneration,
     applyDraft,
     reseed,
+    patchText,
     /** The createItem payload, or null while there is nothing to create. */
     toInput: () => toInput(values),
     /** Whether the Create button should be live. */

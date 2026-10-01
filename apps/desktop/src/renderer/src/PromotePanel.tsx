@@ -105,10 +105,13 @@ export function PromotePanel({
   // A different note refills the form, keeping what is sticky. The first note is
   // already in the form from mount, so there is nothing to do for it.
   const seen = useRef(note.id);
+  // What the note last put in the form, to tell a field left alone from one typed over.
+  const filled = useRef(first);
   useEffect(() => {
     if (seen.current === note.id) return;
     seen.current = note.id;
     const next = prefill(note.text);
+    filled.current = next;
     form.reseed({ type: next.type, summary: next.summary, description: next.description });
     setCutSummary(next.cut ? next.summary : null);
     setCreatedKey(null);
@@ -117,6 +120,27 @@ export function PromotePanel({
     setDrafting(false);
     draftFor.current = null;
   }, [note.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The same note edited on its card: what the form still holds from the old text
+  // follows the new, so a typo fixed there does not come back in Summary. Anything
+  // typed over it here, or put there by a Claude draft, is kept.
+  const seenText = useRef({ id: note.id, text: note.text });
+  useEffect(() => {
+    const last = seenText.current;
+    seenText.current = { id: note.id, text: note.text };
+    // A different note is the refill above, not this.
+    if (last.id !== note.id || last.text === note.text) return;
+    const old = filled.current;
+    const next = prefill(note.text);
+    filled.current = next;
+    const { values } = form;
+    const patch: Parameters<typeof form.patchText>[0] = {};
+    if (values.type === old.type) patch.type = next.type;
+    if (values.summary === old.summary) patch.summary = next.summary;
+    if (values.description === old.description) patch.description = next.description;
+    form.patchText(patch);
+    if (patch.summary !== undefined) setCutSummary(next.cut ? next.summary : null);
+  }, [note.id, note.text]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (focusToken !== null) summaryRef.current?.focus();
