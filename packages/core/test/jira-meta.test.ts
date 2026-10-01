@@ -95,9 +95,12 @@ test("each field schema maps to the editor that produces Jira's value shape", ()
     [{ type: "array", items: "component", system: "components" }, "components"],
     [{ type: "priority", system: "priority" }, "priority"],
     [{ type: "array", items: "string", system: "labels" }, "labels"],
-    // Sites differ on these, so they are sent exactly as written.
-    [{ type: "team", custom: "com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team" }, "raw"],
-    [{ type: "array", items: "json", custom: "com.pyxis.greenhopper.jira:gh-sprint" }, "raw"],
+    // Each used to fall to a JSON box; shapeFieldValue now builds their value.
+    [{ type: "team", custom: "com.atlassian.jira.plugin.system.customfieldtypes:atlassian-team" }, "team"],
+    [{ type: "array", items: "json", custom: "com.pyxis.greenhopper.jira:gh-sprint" }, "sprint"],
+    [{ type: "any", custom: "com.pyxis.greenhopper.jira:gh-lexo-rank" }, "managed"],
+    // Nothing in the schema says what an app field wants.
+    [{ type: "any", custom: "com.example.app:widget" }, "raw"],
   ];
   for (const [schema, kind] of cases) assert.equal(valueKindFor(schema), kind, JSON.stringify(schema));
 });

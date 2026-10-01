@@ -4,8 +4,17 @@ import YAML from "yaml";
 import { z } from "zod";
 
 import { parseDescription, type Block, type Inline } from "./description.js";
+import { markdownToAdf } from "./jira-adf.js";
 import { JIRA_MAP_TEMPLATE } from "./jira-map-template.js";
-import { fieldOn, issueTypeNamed, requiredGaps, type ProjectMeta } from "./jira-meta.js";
+import {
+  fieldOn,
+  issueTypeNamed,
+  requiredGaps,
+  shapeFieldValue,
+  valueKindFor,
+  type ProjectMeta,
+  type ShapeContext,
+} from "./jira-meta.js";
 import type { Item } from "./schema.js";
 import type { Vault } from "./vault.js";
 import { pushableFields } from "./vault.js";
@@ -188,78 +197,7 @@ export async function writeJiraMap(filePath: string, edits: readonly JiraMapEdit
 
 // ------------------------------------------------------- markdown to ADF
 
-type AdfNode = { type: string; [key: string]: unknown };
-
-function adfInline(nodes: Inline[]): AdfNode[] {
-  return nodes.map((node) => {
-    switch (node.kind) {
-      case "link":
-        return {
-          type: "text",
-          text: node.text,
-          marks: [{ type: "link", attrs: { href: node.href } }],
-        };
-      case "code":
-        return { type: "text", text: node.text, marks: [{ type: "code" }] };
-      case "strong":
-        return { type: "text", text: node.text, marks: [{ type: "strong" }] };
-      case "em":
-        return { type: "text", text: node.text, marks: [{ type: "em" }] };
-      case "break":
-        return { type: "hardBreak" };
-      default:
-        return { type: "text", text: node.text };
-    }
-  });
-}
-
-/**
- * Jira Cloud's v3 API takes Atlassian Document Format, not markdown.
- *
- * The grammar lives in description.ts, shared with the desktop app so the two
- * cannot disagree about what a description means; this is only the mapping onto
- * ADF's node names. Anything the grammar does not recognise arrives here as a
- * plain paragraph rather than failing the push.
- */
-export function markdownToAdf(markdown: string): AdfNode {
-  const content: AdfNode[] = parseDescription(markdown).map((block) => {
-    switch (block.kind) {
-      case "heading":
-        return {
-          type: "heading",
-          attrs: { level: block.level },
-          content: adfInline(block.content),
-        };
-      case "list":
-        return {
-          type: block.ordered ? "orderedList" : "bulletList",
-          content: block.items.map((item) => ({
-            type: "listItem",
-            content: [{ type: "paragraph", content: adfInline(item) }],
-          })),
-        };
-      case "quote":
-        return {
-          type: "blockquote",
-          content: [{ type: "paragraph", content: adfInline(block.content) }],
-        };
-      case "code":
-        return {
-          type: "codeBlock",
-          ...(block.language ? { attrs: { language: block.language } } : {}),
-          // An ADF text node may not be empty, so an empty fence gets a space.
-          content: [{ type: "text", text: block.text || " " }],
-        };
-      default:
-        return { type: "paragraph", content: adfInline(block.content) };
-    }
-  });
-
-  if (!content.length) {
-    content.push({ type: "paragraph", content: [] });
-  }
-  return { type: "doc", version: 1, content };
-}
+export { adfToMarkdown, isAdfDoc, markdownToAdf, type AdfNode } from "./jira-adf.js";
 
 // ------------------------------------------------------ markdown to wiki
 
@@ -338,8 +276,16 @@ export interface PushSelection {
   warnings: string[];
 }
 
-/** Which items still need creating in Jira, and why the rest do not. */
-export function selectPushable(items: Item[]): PushSelection {
+/**
+ * Which items still need creating in Jira, and why the rest do not.
+ *
+ * `holdDrifted` is the app's push. There, an item changed since it was pushed
+ * is held back rather than created a second time, because a duplicate in a
+ * tracker a whole team reads is worse than a change that waits for updating to
+ * exist. The CSV export and the MCP planner keep the old behaviour, a warning,
+ * since a person reads their output before anything reaches Jira.
+ */
+export function selectPushable(items: Item[], options: { holdDrifted?: boolean } = {}): PushSelection {
   const warnings: string[] = [];
   const skipped: Array<{ localKey: string; reason: string }> = [];
 
@@ -357,6 +303,13 @@ export function selectPushable(items: Item[]): PushSelection {
         skipped.push({
           localKey: item.key,
           reason: `Already pushed as ${item.sync.jiraKey} and unchanged since`,
+        });
+        return false;
+      }
+      if (options.holdDrifted) {
+        skipped.push({
+          localKey: item.key,
+          reason: `Changed since it was pushed as ${item.sync.jiraKey}. Updating an existing issue is not supported yet, so it is not sent again. Update ${item.sync.jiraKey} in Jira by hand.`,
         });
         return false;
       }
@@ -460,6 +413,8 @@ export interface PushPlanOptions {
   meta?: ProjectMeta;
   /** Values chosen in the push pane for `ask` extra fields, by field id. This push only. */
   askValues?: Readonly<Record<string, unknown>>;
+  /** Hold back items changed since their push instead of creating them again. See `selectPushable`. */
+  holdDrifted?: boolean;
 }
 
 /**
@@ -538,9 +493,16 @@ export function fieldsTheMapCanFill(map: JiraMap, issueTypeName: string): Set<st
     // An "always" field with no value sends nothing. An "ask" field can be
     // given one in the push pane, so it counts.
     if (!extraFieldAppliesTo(spec, issueTypeName)) continue;
-    if (spec.mode === "ask" || (spec.value !== undefined && spec.value !== null)) ids.add(id);
+    if (spec.mode === "ask" || !isBlank(spec.value)) ids.add(id);
   }
   return ids;
+}
+
+/** A value that sends nothing: absent, blank text, or an empty list. */
+function isBlank(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value === "string") return value.trim() === "";
+  return Array.isArray(value) && value.length === 0;
 }
 
 export function buildPushPlan(
@@ -549,10 +511,10 @@ export function buildPushPlan(
   vault: Vault,
   options: PushPlanOptions = {},
 ): JiraPushPlan {
-  const { eligible, skipped, warnings } = selectPushable(items);
+  const { meta, askValues = {}, holdDrifted } = options;
+  const { eligible, skipped, warnings } = selectPushable(items, { holdDrifted });
   const selected = new Map(items.map((i) => [i.key, i]));
   const ordered = orderForCreation(eligible);
-  const { meta, askValues = {} } = options;
 
   const drafts: JiraIssueDraft[] = [];
   const attachments: Array<{ localKey: string; paths: string[] }> = [];
@@ -566,10 +528,17 @@ export function buildPushPlan(
     // is written over them: an extra field named `priority` must not beat the
     // item's own priority. `defaults` first of all, being the older form.
     const fields: Record<string, unknown> = { ...map.defaults };
+    // Fields whose value a person typed, to be shaped into Jira's form once the
+    // issue type's screen is known. `defaults` is left out: it has always been
+    // written in Jira's shape by hand, and is sent exactly as it stands.
+    const typed = new Set<string>();
     for (const [fieldId, spec] of Object.entries(map.extraFields)) {
       if (!extraFieldAppliesTo(spec, issueType)) continue;
       const value = spec.mode === "ask" && fieldId in askValues ? askValues[fieldId] : spec.value;
-      if (value !== undefined && value !== null) fields[fieldId] = value;
+      if (!isBlank(value)) {
+        fields[fieldId] = value;
+        typed.add(fieldId);
+      }
     }
 
     Object.assign(fields, {
@@ -584,7 +553,10 @@ export function buildPushPlan(
 
     const category = resolveCategory(item, map);
     if (category.labels.length) fields.labels = category.labels;
-    if (category.customField) fields[category.customField[0]] = category.customField[1];
+    if (category.customField) {
+      fields[category.customField[0]] = category.customField[1];
+      typed.add(category.customField[0]);
+    }
     if (item.components.length) {
       fields.components = item.components.map((name) => ({ name }));
     }
@@ -626,7 +598,7 @@ export function buildPushPlan(
       }
     }
 
-    if (meta) checkAgainstScreen(item, draft, meta, blockers, grouped);
+    if (meta) checkAgainstScreen(item, draft, meta, blockers, grouped, { typed, people: map.people });
 
     drafts.push(draft);
 
@@ -658,6 +630,7 @@ function checkAgainstScreen(
   meta: ProjectMeta,
   blockers: JiraPushBlocker[],
   grouped: GroupedWarnings,
+  shaping: { typed: ReadonlySet<string>; people: ShapeContext["people"] },
 ): void {
   const type = issueTypeNamed(meta, draft.issueType);
   if (!type) {
@@ -681,6 +654,28 @@ function checkAgainstScreen(
     if (NOT_SCREEN_FIELDS.has(fieldId) || fieldOn(type, fieldId)) continue;
     delete draft.fields[fieldId];
     grouped.add(`${meta.projectKey}'s ${type.name} has no ${fieldId} field, so it is not sent`, item.key);
+  }
+
+  // What a person typed becomes Jira's shape here, against this issue type's
+  // own field: its options, its kind. A value that cannot be shaped is a
+  // blocker, because Jira would refuse the create over it anyway, and the
+  // person can fix it before anything is sent.
+  for (const fieldId of shaping.typed) {
+    const field = fieldOn(type, fieldId);
+    if (!field || !(fieldId in draft.fields)) continue;
+    if (valueKindFor(field.schema) === "managed") {
+      delete draft.fields[fieldId];
+      grouped.add(`${field.name} is set by Jira itself, so it is not sent`, item.key);
+      continue;
+    }
+    const shaped = shapeFieldValue(field, draft.fields[fieldId], { people: shaping.people });
+    if (!shaped.ok) {
+      blockers.push({ localKey: item.key, message: `${item.key} (${type.name}): ${shaped.message}` });
+    } else if (shaped.value === undefined) {
+      delete draft.fields[fieldId];
+    } else {
+      draft.fields[fieldId] = shaped.value;
+    }
   }
 
   const covered = new Set(Object.keys(draft.fields));
