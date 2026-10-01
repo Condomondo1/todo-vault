@@ -438,6 +438,24 @@ function registerHandlers(): void {
 
   handle(CHANNELS.listTrash, () => service.listTrash());
 
+  // The scratch pad. Notes are not items: no keys, no projects, nothing for the
+  // Jira push to see. The snapshot carries the list, so a write answers with a
+  // snapshot like every other mutation and the sidebar updates from it.
+  handle(CHANNELS.listScratch, () => service.listScratch());
+  handle(CHANNELS.addScratch, async (text: string) => {
+    const note = await service.addScratch(text);
+    return { snapshot: await service.snapshot(), note };
+  });
+  handle(CHANNELS.removeScratch, async (id: string) => {
+    const removed = await service.removeScratch(id);
+    return { snapshot: await service.snapshot(), removed };
+  });
+  handle(CHANNELS.listTrashedScratch, () => service.listTrashedScratch());
+  handle(CHANNELS.restoreScratch, async (file: string) => {
+    const note = await service.restoreScratch(file);
+    return { snapshot: await service.snapshot(), note };
+  });
+
   handle(
     CHANNELS.createProject,
     async (input: { key: string; name: string; description?: string }) => {
