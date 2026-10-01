@@ -1630,7 +1630,7 @@ export function App(): React.JSX.Element {
           <span style={{ flex: 1 }}>{vault.undo.message}</span>
           <button
             className="btn"
-            onClick={() => void vault.restore(vault.undo?.files ?? [])}
+            onClick={() => void vault.undoLast()}
             disabled={vault.busy}
           >
             Undo

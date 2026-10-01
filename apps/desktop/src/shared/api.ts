@@ -9,6 +9,9 @@ import type {
   Item,
   ItemFilter,
   Project,
+  RemoveScratchResult,
+  ScratchNote,
+  ScratchTrashEntry,
   Status,
   TrashEntry,
   TurnOnHistoryOptions,
@@ -61,8 +64,16 @@ export interface VaultSnapshot {
   root: string;
   projects: ProjectSummary[];
   items: Item[];
-  /** Files that failed to parse. Surfaced in the UI; otherwise items vanish silently. */
+  /**
+   * Files that failed to parse, items and scratch notes alike. Surfaced in the
+   * UI; otherwise they vanish silently.
+   */
   errors: string[];
+  /**
+   * Every scratch note, newest first. On the snapshot rather than behind its own
+   * call because the sidebar shows the newest few and a count on every view.
+   */
+  scratch: ScratchNote[];
   git: GitStatus;
   trashCount: number;
   loadedAt: string;
@@ -557,6 +568,15 @@ export interface VaultApi {
   restoreItem(file: string): Promise<Result<VaultSnapshot>>;
   listTrash(): Promise<Result<TrashEntry[]>>;
 
+  /** Notes read fresh from disk. The snapshot carries the same list; this is for a caller that wants it alone. */
+  listScratch(): Promise<Result<{ notes: ScratchNote[]; errors: string[] }>>;
+  /** Add a note. Resolves with it, so a caller can select it. */
+  addScratch(text: string): Promise<Result<{ snapshot: VaultSnapshot; note: ScratchNote }>>;
+  /** Trash a note. `file` in the result is what restoreScratch takes. */
+  removeScratch(id: string): Promise<Result<{ snapshot: VaultSnapshot; removed: RemoveScratchResult }>>;
+  listTrashedScratch(): Promise<Result<ScratchTrashEntry[]>>;
+  restoreScratch(file: string): Promise<Result<{ snapshot: VaultSnapshot; note: ScratchNote }>>;
+
   createProject(input: {
     key: string;
     name: string;
@@ -719,6 +739,11 @@ export const CHANNELS = {
   deleteItem: "vault:delete-item",
   restoreItem: "vault:restore-item",
   listTrash: "vault:list-trash",
+  listScratch: "scratch:list",
+  addScratch: "scratch:add",
+  removeScratch: "scratch:remove",
+  listTrashedScratch: "scratch:list-trash",
+  restoreScratch: "scratch:restore",
   createProject: "vault:create-project",
   updateProject: "vault:update-project",
   moveProject: "vault:move-project",

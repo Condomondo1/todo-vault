@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { TurnOnHistoryResult } from "todo-vault";
+import type { ScratchNote, TurnOnHistoryResult } from "todo-vault";
 import type { MaybeSnapshot, Result, VaultApi, VaultSnapshot } from "@shared/api";
 
 /**
@@ -13,7 +13,9 @@ import type { MaybeSnapshot, Result, VaultApi, VaultSnapshot } from "@shared/api
 /** An offer to undo the last destructive action, shown as a toast. */
 export interface UndoOffer {
   message: string;
-  /** The trashed filename to hand back to restoreItem. */
+  /** Which trash the files are in, and so which restore puts them back. */
+  kind: "items" | "scratch";
+  /** The trashed filenames to hand back: to restoreItem, or to restoreScratch. */
   files: string[];
 }
 
@@ -84,6 +86,18 @@ export interface VaultState {
     copy: boolean,
   ) => Promise<{ error: string | null; linkedInstead: string[] }>;
   restore: (files: string[]) => Promise<void>;
+  /**
+   * Add a scratch note. Resolves to the error rather than raising the shared
+   * banner, like createItem: "A scratch note needs some text" belongs beside
+   * the box that was typed into.
+   */
+  addScratch: (text: string) => Promise<{ error: string | null; note: ScratchNote | null }>;
+  /** Trash a note and offer Undo. Resolves to an error message, or null. */
+  removeScratch: (id: string) => Promise<string | null>;
+  /** Put a trashed note back, by the filename removeScratch reported. */
+  restoreScratch: (file: string) => Promise<{ error: string | null; note: ScratchNote | null }>;
+  /** Undo whatever the toast is offering, from whichever trash it came out of. */
+  undoLast: () => Promise<void>;
   /**
    * Set git up for the open vault. A helper rather than `mutate` because the
    * outcome is the point: `needs-identity` and `nested` are not failures, they
@@ -220,6 +234,7 @@ export function useVault(): VaultState {
       const files = result.value.trashed.map((t) => t.trashedTo.split("/").pop() as string);
       const dangling = [...new Set(result.value.trashed.flatMap((t) => t.danglingBacklinks))];
       setUndo({
+        kind: "items",
         message:
           `Trashed ${result.value.trashed.map((t) => t.key).join(", ")}.` +
           (dangling.length ? ` Still linked from ${dangling.join(", ")}.` : ""),
@@ -312,6 +327,71 @@ export function useVault(): VaultState {
     }
   }, []);
 
+  const addScratch = useCallback<VaultState["addScratch"]>(async (text) => {
+    setBusy(true);
+    try {
+      const result = await window.vault.addScratch(text);
+      if (!result.ok) return { error: result.message, note: null };
+      generation.current += 1;
+      setError(null);
+      setSnapshot(result.value.snapshot);
+      return { error: null, note: result.value.note };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err), note: null };
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const removeScratch = useCallback<VaultState["removeScratch"]>(async (id) => {
+    setBusy(true);
+    try {
+      const result = await window.vault.removeScratch(id);
+      if (!result.ok) {
+        setError(result.message);
+        return result.message;
+      }
+      generation.current += 1;
+      setError(null);
+      setSnapshot(result.value.snapshot);
+      setUndo({ kind: "scratch", message: "Trashed a scratch note.", files: [result.value.removed.file] });
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const restoreScratch = useCallback<VaultState["restoreScratch"]>(async (file) => {
+    setBusy(true);
+    try {
+      const result = await window.vault.restoreScratch(file);
+      if (!result.ok) {
+        setError(result.message);
+        return { error: result.message, note: null };
+      }
+      generation.current += 1;
+      setError(null);
+      setSnapshot(result.value.snapshot);
+      return { error: null, note: result.value.note };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err), note: null };
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const undoLast = useCallback(async () => {
+    if (!undo) return;
+    if (undo.kind === "items") return restore(undo.files);
+    for (const file of undo.files) {
+      const { error: message } = await restoreScratch(file);
+      if (message) break;
+    }
+    setUndo(null);
+  }, [undo, restore, restoreScratch]);
+
   return useMemo<VaultState>(
     () => ({
       snapshot,
@@ -331,6 +411,10 @@ export function useVault(): VaultState {
       updateItems,
       attachPaths,
       restore,
+      addScratch,
+      removeScratch,
+      restoreScratch,
+      undoLast,
       turnOnHistory,
       lastCreated,
     }),
@@ -349,6 +433,10 @@ export function useVault(): VaultState {
       updateItems,
       attachPaths,
       restore,
+      addScratch,
+      removeScratch,
+      restoreScratch,
+      undoLast,
       turnOnHistory,
     ],
   );

@@ -3,6 +3,7 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 
 import chokidar, { type FSWatcher } from "chokidar";
+import { SCRATCH_DIR } from "todo-vault/constants";
 import {
   jiraMapPath,
   loadJiraMap,
@@ -17,6 +18,9 @@ import {
   type HistoryQuery,
   type Item,
   type Project,
+  type RemoveScratchResult,
+  type ScratchNote,
+  type ScratchTrashEntry,
   type Status,
   type TrashEntry,
   type TurnOnHistoryOptions,
@@ -116,6 +120,11 @@ export class VaultService extends EventEmitter {
   private async attach(vault: Vault): Promise<void> {
     await this.stopWatching();
     this.vault = vault;
+    // Before the watcher, not after: chokidar's behaviour on a path that does
+    // not exist yet is unverified, and a vault made before the pad has no
+    // scratch/ folder. Watching a missing one could mean notes added over MCP
+    // never reach the sidebar until a restart.
+    await vault.ensureScratchDir();
     this.startWatching(vault.root);
   }
 
@@ -132,8 +141,11 @@ export class VaultService extends EventEmitter {
   // ------------------------------------------------------------- watching
 
   /**
-   * Watch items/ and projects/ so an edit from outside the app — an external
-   * Claude, or Notepad — shows up without a manual refresh.
+   * Watch items/, projects/ and scratch/ so an edit from outside the app — an
+   * external Claude, or Notepad — shows up without a manual refresh. A change
+   * under scratch/ reloads everything, items included: the snapshot is one
+   * object and the item load is a read of a few hundred small files, so a
+   * second, narrower refresh path would be more to keep right than it saves.
    *
    * Debounced because a single logical change can produce several events: the
    * atomic write in the core creates a temp file and renames it, which fires
@@ -141,7 +153,7 @@ export class VaultService extends EventEmitter {
    */
   private startWatching(root: string): void {
     this.watcher = chokidar.watch(
-      [path.join(root, "items"), path.join(root, "projects")],
+      [path.join(root, "items"), path.join(root, "projects"), path.join(root, SCRATCH_DIR)],
       {
         ignoreInitial: true,
         // Temp files from writeFileAtomic are transient and never worth a reload.
@@ -217,12 +229,16 @@ export class VaultService extends EventEmitter {
 
     const { items } = vault.listItems({ limit: 500 });
     const trash = await vault.listTrash();
+    const scratch = await vault.listScratch();
 
     return {
       root: vault.root,
       projects,
       items,
-      errors,
+      // A note that does not parse is reported beside an item that does not, the
+      // same way: skipped, never thrown, and visible rather than silently gone.
+      errors: [...errors, ...scratch.errors],
+      scratch: scratch.notes,
       git: await vault.gitStatus(),
       trashCount: trash.length,
       loadedAt: new Date().toISOString(),
@@ -447,6 +463,29 @@ export class VaultService extends EventEmitter {
 
   listTrash(): Promise<TrashEntry[]> {
     return this.write((v) => v.listTrash());
+  }
+
+  // ------------------------------------------------------------- scratch
+
+  /** Read from disk, queued so it never lands in the middle of a write. */
+  listScratch(): Promise<{ notes: ScratchNote[]; errors: string[] }> {
+    return this.serialize(() => this.requireVault().listScratch());
+  }
+
+  addScratch(text: string): Promise<ScratchNote> {
+    return this.write((v) => v.addScratch(text));
+  }
+
+  removeScratch(id: string): Promise<RemoveScratchResult> {
+    return this.write((v) => v.removeScratch(id));
+  }
+
+  listTrashedScratch(): Promise<ScratchTrashEntry[]> {
+    return this.serialize(() => this.requireVault().listTrashedScratch());
+  }
+
+  restoreScratch(file: string): Promise<ScratchNote> {
+    return this.write((v) => v.restoreScratch(file));
   }
 
   createProject(input: {
