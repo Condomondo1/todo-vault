@@ -10,9 +10,9 @@ import { usePasteSplit } from "./usePasteSplit";
  * a "+ new", the newest few notes as one-line rows, then "More…" to the page.
  *
  * It is on every view, because jotting something down should not mean leaving
- * what you are doing. Quick-add lives here: Enter adds and keeps the box open
- * for the next one, Escape closes it. A bare `j` typed into it is a "j": the
- * window handler ignores keys aimed at a text field.
+ * what you are doing. Quick-add lives here: Enter (or Ctrl+Enter) adds, empties
+ * the box and keeps it open for the next one, Escape closes it. A bare `j` typed
+ * into it is a "j": the window handler ignores keys aimed at a text field.
  */
 export function ScratchSection({
   notes,
@@ -59,16 +59,25 @@ export function ScratchSection({
   const moreCurrent = onPage && !latest.some((note) => note.id === selectedId);
   const now = new Date();
 
+  /**
+   * Empties the box as the note is sent rather than once it lands: the save is a
+   * git commit, which can take long enough on a real vault that text left
+   * sitting in the box reads as "not saved" and gets sent again. Emptied in the
+   * keypress itself, so a second press finds nothing to send, while a new note
+   * typed during the save still goes. A refusal puts the text back, unless
+   * something new has been typed in the meantime.
+   */
   const submit = async (): Promise<void> => {
     const text = draft.trim();
     if (!text) return;
+    setDraft("");
     const message = await onAdd(text);
     if (message) {
       setError(message);
+      setDraft((current) => (current === "" ? draft : current));
       return;
     }
     setError(null);
-    setDraft("");
   };
 
   return (
@@ -99,7 +108,8 @@ export function ScratchSection({
             onKeyDown={(e) => {
               // Not stopped from reaching the window: its handler already ignores
               // bare keys aimed at a text field, and Ctrl-K has to keep working here.
-              if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+              // Ctrl+Enter adds too, since it is what saves everywhere else.
+              if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 paste.keepOne();
                 void submit();

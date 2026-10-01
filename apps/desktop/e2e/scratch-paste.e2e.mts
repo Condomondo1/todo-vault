@@ -172,7 +172,7 @@ describe("pasting several lines into a scratch box", { concurrency: 1 }, () => {
     await prompt().getByRole("button", { name: "Add as 3 notes" }).click();
 
     await eventually("three notes to be added", noteTexts, (texts) => ["north", "south", "east"].every((t) => texts.includes(t)));
-    await page.locator(".toast").getByText("Added 3 notes to scratch").waitFor({ state: "visible" });
+    await page.locator(".toast").getByText("3 notes added to Scratch").waitFor({ state: "visible" });
     await eventually("the sidebar box to empty", () => sidebarBox().inputValue(), (value) => value === "");
   });
 

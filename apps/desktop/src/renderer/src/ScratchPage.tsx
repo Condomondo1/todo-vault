@@ -54,15 +54,18 @@ export function ScratchPage({
 
   const paste = usePasteSplit({ draft, setDraft, addNotes: onAddMany });
 
+  /** Empties the box as the note is sent, as the sidebar's does; see ScratchSection. */
   const submit = async (): Promise<void> => {
     if (!draft.trim()) return;
-    const message = await onAdd(draft);
+    const text = draft;
+    setDraft("");
+    const message = await onAdd(text);
     if (message) {
       setError(message);
+      setDraft((current) => (current === "" ? text : current));
       return;
     }
     setError(null);
-    setDraft("");
   };
 
   const now = new Date();
@@ -80,7 +83,8 @@ export function ScratchPage({
           onKeyDown={(e) => {
             // Not stopped from reaching the window: its handler already ignores
             // bare keys aimed at a text field, and Ctrl-K has to keep working here.
-            if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+            // Ctrl+Enter adds too, since it is what saves everywhere else.
+            if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               // Enter on a pasted list is the answer "one note", as Escape is.
               paste.keepOne();
