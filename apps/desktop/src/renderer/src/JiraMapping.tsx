@@ -288,6 +288,7 @@ export function JiraMapping({ vaultPeople }: { vaultPeople: string[] }): React.J
             mappedFieldIds={mappedFieldIds}
             value={extraFields}
             onChange={setExtraFields}
+            people={people}
           />
 
           <PeopleLinks

@@ -57,4 +57,19 @@ describe("the Jira push pane", { concurrency: 1 }, () => {
     await pane().getByRole("button", { name: "Close" }).click();
     await pane().waitFor({ state: "hidden" });
   });
+
+  test("from the command palette, for the same checked rows, found by typing", async () => {
+    // The row from the previous test is still checked.
+    await harness.page.keyboard.press("Control+K");
+    const palette = harness.page.locator(".palette");
+    await palette.waitFor({ state: "visible" });
+    await palette.locator(".palette-input").fill("push jira");
+    const action = palette.locator(".palette-row", { hasText: "Push to Jira…" });
+    assert.match(await action.innerText(), /1 checked/);
+    await harness.page.keyboard.press("Enter");
+    await palette.waitFor({ state: "hidden" });
+    await pane().locator(".modal-error").waitFor({ state: "visible" });
+    await pane().getByRole("button", { name: "Close" }).click();
+    await pane().waitFor({ state: "hidden" });
+  });
 });

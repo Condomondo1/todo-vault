@@ -14,8 +14,12 @@
  *   does not fill it is blocked before anything is sent.
  * - **Epic has no Start date**, so a start date on an epic is dropped with a
  *   warning rather than refused by Jira.
- * - **POST /issue validates like Jira does** — project, issue type, and the
- *   required Team on a Story — and answers a miss with Jira's own error shape,
+ * - **Story has a paragraph, a cascading select and Rank**, the three fields
+ *   a person used to meet as a JSON box. Jira wants ADF in a paragraph and
+ *   refuses Rank on create, and so does this fake.
+ * - **POST /issue validates like Jira does** — project, issue type, the
+ *   required Team on a Story, ADF in a paragraph, ids in a cascading select,
+ *   no Rank — and answers a miss with Jira's own error shape,
  *   so a push that got past the checks it should have failed is caught here
  *   rather than passing because the fake accepted anything.
  */
@@ -36,6 +40,20 @@ export const TEAMS = [
   { id: "t2", value: "Payments" },
 ];
 export const START_DATE_FIELD = "customfield_10015";
+/** A textarea custom field: plain text in the app, ADF on the wire. */
+export const PROPOSAL_FIELD = "customfield_10050";
+/** A cascading select, region then city. */
+export const REGION_FIELD = "customfield_10060";
+export const REGIONS = [
+  { id: "r1", value: "Europe", children: [{ id: "r11", value: "Berlin" }, { id: "r12", value: "Lisbon" }] },
+  { id: "r2", value: "Americas", children: [{ id: "r21", value: "Denver" }] },
+];
+/** A user field that is not the assignee, so its picker searches the whole site. */
+export const REVIEWER_FIELD = "customfield_10070";
+/** Someone the site search finds and the assignable search does not. */
+export const PRIYA = { accountId: "acc-priya", displayName: "Priya Raman", active: true, accountType: "atlassian" };
+/** Jira's board ordering. On the create screen, and refused if sent. */
+export const RANK_FIELD = "customfield_10019";
 
 /** The one person the assignable search knows. */
 export const DAN = { accountId: "acc-dan", displayName: "Dan Okafor", active: true, accountType: "atlassian" };
@@ -84,11 +102,26 @@ const startDate = f(START_DATE_FIELD, "Start date", {
   custom: "com.atlassian.jira.plugin.system.customfieldtypes:datepicker",
 });
 const parent = f("parent", "Parent", { type: "issuelink", system: "parent" });
+const proposal = f(PROPOSAL_FIELD, "Proposed Solution at Onset", {
+  type: "string",
+  custom: "com.atlassian.jira.plugin.system.customfieldtypes:textarea",
+});
+const region = f(
+  REGION_FIELD,
+  "Region",
+  { type: "option-with-child", custom: "com.atlassian.jira.plugin.system.customfieldtypes:cascadingselect" },
+  { allowedValues: REGIONS },
+);
+const reviewer = f(REVIEWER_FIELD, "Reviewer", {
+  type: "user",
+  custom: "com.atlassian.jira.plugin.system.customfieldtypes:userpicker",
+});
+const rank = f(RANK_FIELD, "Rank", { type: "any", custom: "com.pyxis.greenhopper.jira:gh-lexo-rank" });
 
 /** Each issue type's create screen. */
 export const FIELDS: Record<string, Field[]> = {
   [ISSUE_TYPES.epic.id]: [...COMMON, team(false)],
-  [ISSUE_TYPES.story.id]: [...COMMON, team(true), startDate, parent],
+  [ISSUE_TYPES.story.id]: [...COMMON, team(true), startDate, parent, proposal, region, reviewer, rank],
   [ISSUE_TYPES.task.id]: [...COMMON, team(false), startDate, parent],
   [ISSUE_TYPES.subtask.id]: [...COMMON, { ...parent, required: true }],
 };
@@ -111,6 +144,10 @@ export function serveProject(jira: FakeJira): ServedProject {
     jira.route("GET", `${base}/${id}`, () => ({ body: { startAt: 0, maxResults: 50, total: fields.length, fields } }));
   }
   jira.route("GET", "/rest/api/3/user/assignable/search", () => ({ body: [DAN] }));
+  // The site-wide search: everyone, plus an app account Jira returns too and the app must not offer.
+  jira.route("GET", "/rest/api/3/user/search", () => ({
+    body: [DAN, PRIYA, { accountId: "acc-bot", displayName: "Automation", active: true, accountType: "app" }],
+  }));
 
   jira.route("POST", "/rest/api/3/issue", (req: FakeJiraRequest) => {
     const { fields } = JSON.parse(req.body) as { fields: Record<string, unknown> };
@@ -120,6 +157,15 @@ export function serveProject(jira: FakeJira): ServedProject {
     if (project?.key !== PROJECT.key) errors.project = "valid project is required";
     if (!type?.id || !FIELDS[type.id]) errors.issuetype = "valid issue type is required";
     if (type?.id === ISSUE_TYPES.story.id && !fields[TEAM_FIELD]) errors[TEAM_FIELD] = "Team is required.";
+    const doc = fields[PROPOSAL_FIELD] as { type?: string; version?: number } | undefined;
+    if (doc !== undefined && (doc?.type !== "doc" || doc.version !== 1)) {
+      errors[PROPOSAL_FIELD] = "Operation value must be an Atlassian Document (see the Atlassian Document Format).";
+    }
+    const where = fields[REGION_FIELD] as { id?: string; child?: { id?: string } } | undefined;
+    if (where !== undefined && !REGIONS.some((r) => r.id === where?.id && (!where.child || r.children.some((c) => c.id === where.child?.id)))) {
+      errors[REGION_FIELD] = "Specify a valid value for Region";
+    }
+    if (RANK_FIELD in fields) errors[RANK_FIELD] = "Field 'Rank' cannot be set. It is not on the appropriate screen, or unknown.";
     for (const key of Object.keys(fields)) {
       if (type?.id && FIELDS[type.id] && key !== "parent" && !FIELDS[type.id].some((x) => x.fieldId === key)) {
         errors[key] = `Field '${key}' cannot be set. It is not on the appropriate screen, or unknown.`;

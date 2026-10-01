@@ -19,7 +19,16 @@ import { after, before, describe, test } from "node:test";
 import { Vault, jiraMapPath, writeJiraMap } from "todo-vault";
 
 import { canStartFakeJira, startFakeJira, type FakeJira } from "./fake-jira.mjs";
-import { DAN, ISSUE_TYPES, TEAM_FIELD, serveProject, type ServedProject } from "./fake-jira-project.mjs";
+import {
+  DAN,
+  ISSUE_TYPES,
+  PROPOSAL_FIELD,
+  RANK_FIELD,
+  REGION_FIELD,
+  TEAM_FIELD,
+  serveProject,
+  type ServedProject,
+} from "./fake-jira-project.mjs";
 import { launchHarness, type Harness } from "./harness.mjs";
 import { eventually, itemRow } from "./drive.mjs";
 
@@ -157,6 +166,46 @@ describe(
       await pane().getByText(/Already pushed as ENG-1/).waitFor();
       assert.equal(posts().length, before);
       await pane().getByRole("button", { name: "Cancel" }).click();
+      await pane().waitFor({ state: "hidden" });
+    });
+
+    test("values typed as a person means them arrive in Jira's shape, and Rank is never sent", async () => {
+      // What someone would write by hand in jira-map.yaml: a name, a
+      // paragraph, a path. No ids and no JSON.
+      await writeJiraMap(jiraMapPath(harness.vaultRoot), [
+        { path: ["extraFields", TEAM_FIELD], value: { name: "Team", mode: "always", value: "payments", issueTypes: ["Story"] } },
+        { path: ["extraFields", PROPOSAL_FIELD], value: { mode: "always", value: "Ship it **today**", issueTypes: ["Story"] } },
+        { path: ["extraFields", REGION_FIELD], value: { mode: "always", value: "Europe / Berlin", issueTypes: ["Story"] } },
+        { path: ["extraFields", RANK_FIELD], value: { name: "Rank", mode: "always", value: "0|hzzzzz:", issueTypes: ["Story"] } },
+      ]);
+      const vault = await Vault.open(harness.vaultRoot);
+      const story = await vault.createItem({ project: "ACME", type: "story", summary: "Email the invoice" });
+      await itemRow(harness.page, story.key).waitFor({ state: "visible" });
+      await itemRow(harness.page, story.key).locator('input[type="checkbox"]').check();
+
+      await harness.page.locator(".bulk-bar").getByRole("button", { name: "Push to Jira…" }).click();
+      await pane().getByText(/Rank is set by Jira itself/).waitFor();
+      const create = pane().getByRole("button", { name: "Create 1 issue in ENG" });
+      await eventually("the plan has no blockers", () => create.isEnabled(), (on) => on);
+      await create.click();
+      await pane().getByText("Created 1").waitFor();
+
+      const sent = project.created.at(-1)?.fields ?? {};
+      assert.deepEqual(sent[TEAM_FIELD], { id: "t2" }, "an option typed as its name goes as its id");
+      const doc = sent[PROPOSAL_FIELD] as { type: string; version: number; content: unknown[] };
+      assert.equal(doc.type, "doc", "a paragraph typed as text goes as ADF");
+      assert.equal(doc.version, 1);
+      assert.deepEqual(doc.content, [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "Ship it " },
+            { type: "text", text: "today", marks: [{ type: "strong" }] },
+          ],
+        },
+      ]);
+      assert.deepEqual(sent[REGION_FIELD], { id: "r1", child: { id: "r11" } });
+      assert.equal(RANK_FIELD in sent, false);
     });
   },
 );

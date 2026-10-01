@@ -1550,6 +1550,27 @@ export function App(): React.JSX.Element {
           */
           items={visibleItems}
           projects={visibleProjects}
+          actions={
+            checked.size > 0
+              ? [
+                  {
+                    id: "push-to-jira",
+                    label: "Push to Jira…",
+                    meta: `${checked.size} checked`,
+                    run: () => setJiraPushKeys([...checked]),
+                  },
+                ]
+              : detailItem
+                ? [
+                    {
+                      id: "push-to-jira",
+                      label: "Push to Jira…",
+                      meta: detailItem.key,
+                      run: () => setJiraPushKeys([detailItem.key]),
+                    },
+                  ]
+                : []
+          }
           onClose={() => setPaletteOpen(false)}
           onSelectItem={open}
           onSelectProject={setProject}

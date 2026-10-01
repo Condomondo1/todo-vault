@@ -13,10 +13,20 @@ import { promises as fs } from "node:fs";
 import { promisify } from "node:util";
 import { after, before, describe, test } from "node:test";
 
-import { Vault, jiraMapPath, loadJiraMap } from "todo-vault";
+import { Vault, jiraMapPath, loadJiraMap, writeJiraMap } from "todo-vault";
 
 import { canStartFakeJira, startFakeJira, type FakeJira } from "./fake-jira.mjs";
-import { DAN, START_DATE_FIELD, TEAM_FIELD, serveProject } from "./fake-jira-project.mjs";
+import {
+  DAN,
+  PROPOSAL_FIELD,
+  PRIYA,
+  RANK_FIELD,
+  REGION_FIELD,
+  REVIEWER_FIELD,
+  START_DATE_FIELD,
+  TEAM_FIELD,
+  serveProject,
+} from "./fake-jira-project.mjs";
 import { launchHarness, type Harness } from "./harness.mjs";
 
 const EMAIL = "me@acme.com";
@@ -205,6 +215,76 @@ describe(
       const map = await loadJiraMap(jiraMapPath(harness.vaultRoot));
       assert.equal(TEAM_FIELD in map.extraFields, false);
       assert.equal(map.people["Dan Okafor"]?.accountId, DAN.accountId, "the person is untouched");
+    });
+
+    const extra = (id: string) => mapping().locator(`.jira-extra[data-field-id="${id}"]`);
+
+    test("Rank is never offered as an extra field: Jira sets it itself", async () => {
+      const offered = await select("Add a field").locator("option").evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value));
+      assert.ok(offered.includes(PROPOSAL_FIELD), "the paragraph is offered");
+      assert.equal(offered.includes(RANK_FIELD), false);
+    });
+
+    test("a paragraph is typed as text and a cascading select is two selects, with no JSON box", async () => {
+      await select("Add a field").selectOption(PROPOSAL_FIELD);
+      await extra(PROPOSAL_FIELD).locator("textarea").fill("Ship it **today**");
+      await extra(PROPOSAL_FIELD).getByText("Formatted like a description", { exact: false }).waitFor();
+
+      await select("Add a field").selectOption(REGION_FIELD);
+      await extra(REGION_FIELD).getByLabel("Region, first level").selectOption({ label: "Europe" });
+      await extra(REGION_FIELD).getByLabel("Region, second level").selectOption({ label: "Lisbon" });
+
+      assert.equal(await mapping().getByText("Sent exactly as written", { exact: false }).count(), 0);
+
+      await mapping().getByRole("button", { name: "Save mapping" }).click();
+      await mapping().getByText("Saved to jira-map.yaml.").waitFor();
+      const map = await loadJiraMap(jiraMapPath(harness.vaultRoot));
+      assert.equal(map.extraFields[PROPOSAL_FIELD]?.value, "Ship it **today**", "stored as the markdown typed");
+      assert.deepEqual(map.extraFields[REGION_FIELD]?.value, { id: "r1", child: { id: "r12" } });
+    });
+
+    test("a person field offers the linked people, and finds anyone else on the site", async () => {
+      await select("Add a field").selectOption(REVIEWER_FIELD);
+      const reviewer = extra(REVIEWER_FIELD);
+      assert.deepEqual(await reviewer.getByLabel("Reviewer: a linked person").locator("option").allInnerTexts(), [
+        "Linked people…",
+        DAN.displayName,
+      ]);
+      await reviewer.getByLabel("Reviewer: search Jira").fill("priya");
+      await reviewer.getByRole("button", { name: "Find" }).click();
+      const results = reviewer.getByLabel("Reviewer: search results");
+      await results.waitFor();
+      assert.deepEqual(await results.locator("option").allInnerTexts(), [
+        "2 matches — choose…",
+        DAN.displayName,
+        PRIYA.displayName,
+      ], "active humans only: the app account is not offered");
+      await results.selectOption(PRIYA.accountId);
+      await reviewer.locator(".pill", { hasText: PRIYA.displayName }).waitFor();
+      assert.ok(jira.requests.some((r) => r.path.startsWith("/rest/api/3/user/search") && r.authorized));
+
+      await mapping().getByRole("button", { name: "Save mapping" }).click();
+      await mapping().getByText("Saved to jira-map.yaml.").waitFor();
+      const map = await loadJiraMap(jiraMapPath(harness.vaultRoot));
+      assert.deepEqual(map.extraFields[REVIEWER_FIELD]?.value, { accountId: PRIYA.accountId });
+    });
+
+    test("a Rank already in the map says it is not sent, and can be removed", async () => {
+      await writeJiraMap(jiraMapPath(harness.vaultRoot), [
+        { path: ["extraFields", RANK_FIELD], value: { name: "Rank", mode: "always", value: "0|hzzzzz:" } },
+      ]);
+      await settings().getByRole("button", { name: "Close" }).last().click();
+      await settings().waitFor({ state: "hidden" });
+      await harness.page.getByRole("button", { name: "Jira", exact: true }).click();
+      await tab("Mapping").click();
+      await mapping().getByRole("button", { name: "Load project" }).click();
+
+      await extra(RANK_FIELD).getByText("Jira sets this itself; it is not sent.").waitFor();
+      assert.equal(await extra(RANK_FIELD).locator("select, input, textarea").count(), 0);
+      // The paragraph saved above reads back as the text it was typed as.
+      assert.equal(await extra(PROPOSAL_FIELD).locator("textarea").inputValue(), "Ship it **today**");
+      await extra(RANK_FIELD).getByRole("button", { name: "Remove" }).click();
+      await extra(RANK_FIELD).waitFor({ state: "detached" });
     });
   },
 );

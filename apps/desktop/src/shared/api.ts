@@ -188,7 +188,12 @@ export interface JiraExtraField {
   name?: string;
   /** `always` sends `value` on every issue; `ask` offers it, prefilled, on each push. */
   mode: "always" | "ask";
-  /** Already in the shape Jira's create API takes. */
+  /**
+   * What a person chose or typed: an option as `{ id }`, a paragraph as
+   * markdown, a person as `{ accountId }`, a list as an array. The core's
+   * `shapeFieldValue` builds Jira's create shape from it at push time, and
+   * passes a value already in that shape through unchanged.
+   */
   value?: unknown;
   /** Only these issue types, by name. Absent means every type. */
   issueTypes?: string[];
@@ -263,6 +268,8 @@ export interface JiraChoice {
   /** Already in the shape Jira's create API takes, e.g. `{ id: "10021" }`. */
   value: unknown;
   label: string;
+  /** A cascading select's second level, under this parent. */
+  children?: JiraChoice[];
 }
 
 /** An `ask` extra field, offered once per push, prefilled from the map. */
@@ -294,6 +301,8 @@ export interface JiraPushPreview {
   blockers: Array<{ localKey: string; message: string }>;
   skipped: Array<{ localKey: string; reason: string }>;
   askFields: JiraAskField[];
+  /** The map's linked people, for a user field's picker. */
+  people: Record<string, JiraPersonLink>;
   /** Must be resolved before these items can be pushed again. */
   uncertain: JiraUncertainAttempt[];
 }
@@ -302,10 +311,13 @@ export type JiraPushProgress =
   | { localKey: string; state: "creating" }
   | { localKey: string; state: "created"; jiraKey: string; url: string }
   | { localKey: string; state: "failed"; message: string; uncertain: boolean }
-  | { localKey: string; state: "skipped"; reason: string };
+  | { localKey: string; state: "skipped"; reason: string }
+  /** Jira answered 429; the push is waiting, not hung. Not about one item. */
+  | { state: "slowedDown"; waitMs: number };
 
 export interface JiraPushOutcome {
   created: Array<{ localKey: string; jiraKey: string; jiraId: string; url: string }>;
+  /** `fieldErrors` is keyed by Jira's name for the field where the project told us, else its id. */
   failed: Array<{ localKey: string; message: string; fieldErrors: Record<string, string>; uncertain: boolean }>;
   skipped: Array<{ localKey: string; reason: string }>;
 }
@@ -540,6 +552,11 @@ export interface VaultApi {
   jiraSaveMap(choice: JiraMappingChoice): Promise<Result<JiraMapState>>;
   /** People Jira will accept as an assignee in this project, matching `query`. */
   jiraSearchPeople(projectKey: string, query: string): Promise<Result<JiraPerson[]>>;
+  /**
+   * Anyone on the site matching `query`, for a user field that is not the
+   * assignee, such as a reviewer. Active human accounts only.
+   */
+  jiraSearchUsers(query: string): Promise<Result<JiraPerson[]>>;
   clearJiraCredentials(): Promise<Result<JiraStatus>>;
 
   /**
@@ -645,6 +662,7 @@ export const CHANNELS = {
   jiraLoadMeta: "jira:load-meta",
   jiraSaveMap: "jira:save-map",
   jiraSearchPeople: "jira:search-people",
+  jiraSearchUsers: "jira:search-users",
   clearJiraCredentials: "jira:clear-credentials",
   jiraPreviewPush: "jira:preview-push",
   jiraPush: "jira:push",

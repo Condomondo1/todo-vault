@@ -18,12 +18,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import {
+  adfToMarkdown,
   buildPushPlan,
   createJiraClient,
   distinctFields,
   fetchProjectMeta,
-  fieldOn,
-  issueTypeNamed,
   jiraMapPath,
   loadJiraMap,
   pushTargetProblem,
@@ -48,6 +47,7 @@ import type {
   JiraPushProgress,
 } from "../shared/api.js";
 import { choicesFor } from "../shared/jira-choices.js";
+import { fieldName, namedFieldErrors } from "./jira-names.js";
 import { parseStoredCredential } from "./jira-credential.js";
 import { getSecret } from "./secrets.js";
 import type { VaultService } from "./vault-service.js";
@@ -121,7 +121,10 @@ interface PushContext {
 const META_TTL_MS = 10 * 60_000;
 const metaCache = new Map<string, ProjectMeta>();
 
-async function loadContext(service: VaultService, options: { freshMeta?: boolean } = {}): Promise<PushContext> {
+async function loadContext(
+  service: VaultService,
+  options: { freshMeta?: boolean; onRateLimit?: (waitMs: number) => void } = {},
+): Promise<PushContext> {
   const root = service.root;
   if (!root) throw new Error("No vault is open.");
 
@@ -146,6 +149,7 @@ async function loadContext(service: VaultService, options: { freshMeta?: boolean
     cloudId,
     email: stored.email,
     token: stored.token,
+    ...(options.onRateLimit ? { onRateLimit: options.onRateLimit } : {}),
   });
 
   const typeNames = [...new Set(Object.values(map.issueTypes))].sort();
@@ -166,6 +170,10 @@ async function loadContext(service: VaultService, options: { freshMeta?: boolean
  * The plan for these keys, with anything awaiting an answer about an uncertain
  * attempt held back. That item may already exist in Jira; pushing it again
  * before someone checks is how a duplicate gets made.
+ *
+ * `holdDrifted` for the same reason: an item changed since it was pushed is
+ * listed as "update not supported yet", where the CSV export would create it
+ * again. The app has no update yet, and a second issue is worse than none.
  */
 async function planFor(
   service: VaultService,
@@ -177,7 +185,7 @@ async function planFor(
   return service.read((vault) => {
     const items = new Map(keys.map((key) => [key, vault.getItem(key)]));
     const sendable = [...items.values()].filter((item) => !pending.has(item.key));
-    const plan = buildPushPlan(sendable, ctx.map, vault, { meta: ctx.meta, askValues });
+    const plan = buildPushPlan(sendable, ctx.map, vault, { meta: ctx.meta, askValues, holdDrifted: true });
     for (const key of keys) {
       if (pending.has(key)) {
         plan.skipped.push({
@@ -192,30 +200,17 @@ async function planFor(
 
 // ---------------------------------------------------------------- preview
 
-/** A value as one line of text: names over ids, ADF as its words. */
+/** A value as one line of text: names over ids, ADF as its markdown. */
 function describe(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value !== "object") return String(value);
   if (Array.isArray(value)) return value.map(describe).join(", ");
   const obj = value as Record<string, unknown>;
-  if (obj.type === "doc") return adfText(obj).slice(0, 280);
+  if (obj.type === "doc") return adfToMarkdown(obj).slice(0, 280);
   for (const key of ["name", "value", "displayName", "key", "accountId", "id"]) {
     if (typeof obj[key] === "string" || typeof obj[key] === "number") return String(obj[key]);
   }
   return JSON.stringify(value);
-}
-
-function adfText(node: unknown): string {
-  if (!node || typeof node !== "object") return "";
-  const n = node as { type?: string; text?: string; content?: unknown[] };
-  if (typeof n.text === "string") return n.text;
-  const parts = (n.content ?? []).map(adfText);
-  return parts.join(n.type === "doc" ? "\n" : "").trim();
-}
-
-function fieldName(meta: ProjectMeta, issueType: string, fieldId: string): string {
-  const type = issueTypeNamed(meta, issueType);
-  return (type && fieldOn(type, fieldId)?.name) ?? fieldId;
 }
 
 function askFieldsFor(ctx: PushContext, askValues: Record<string, unknown>): JiraAskField[] {
@@ -229,7 +224,7 @@ function askFieldsFor(ctx: PushContext, askValues: Record<string, unknown>): Jir
         fieldId,
         name: spec.name ?? field?.name ?? fieldId,
         kind,
-        choices: kind === "cascading" ? [] : choicesFor(field?.allowedValues),
+        choices: choicesFor(field?.allowedValues),
         value: fieldId in askValues ? askValues[fieldId] : spec.value,
       };
     });
@@ -267,6 +262,7 @@ export async function previewPush(
     blockers: plan.blockers,
     skipped: plan.skipped,
     askFields: askFieldsFor(ctx, askValues),
+    people: ctx.map.people,
     uncertain: (await uncertainAttempts(ctx.root)).map((attempt) => ({
       ...attempt,
       searchUrl: uncertainAttemptSearchUrl(ctx.client.site, ctx.meta.projectKey, attempt),
@@ -290,15 +286,23 @@ export async function runPush(
   try {
     // Fresh metadata for the real thing: a field made required since the
     // preview should block here, not be discovered by Jira mid-batch.
-    const ctx = await loadContext(service, { freshMeta: true });
+    const ctx = await loadContext(service, {
+      freshMeta: true,
+      onRateLimit: (waitMs) => onProgress({ state: "slowedDown", waitMs }),
+    });
     const { plan } = await planFor(service, ctx, keys, askValues);
-    return await sendPushPlan(ctx.client, plan, {
+    const outcome = await sendPushPlan(ctx.client, plan, {
       markPushed: async (localKey, jiraKey, jiraId) => {
         await service.markPushed(localKey, jiraKey, jiraId);
       },
       journal: fileJournal(ctx.root),
       onProgress,
     });
+    const typeOf = new Map(plan.drafts.map((d) => [d.localKey, d.issueType]));
+    return {
+      ...outcome,
+      failed: outcome.failed.map((f) => namedFieldErrors(f, ctx.meta, typeOf.get(f.localKey))),
+    };
   } finally {
     running = false;
   }
