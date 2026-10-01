@@ -16,6 +16,7 @@ import {
   type Item,
 } from "./schema.js";
 import { formatZodError, isTickedFor, todayIso } from "./util.js";
+import { VERSION } from "./version.js";
 import path from "node:path";
 
 /**
@@ -74,7 +75,7 @@ Files in synced folders. Do not copy a file out of OneDrive, SharePoint, Google 
 }
 
 const server = new McpServer(
-  { name: "todo-vault-mcp-server", version: "0.1.0" },
+  { name: "todo-vault-mcp-server", version: VERSION },
   { instructions: buildInstructions() },
 );
 
