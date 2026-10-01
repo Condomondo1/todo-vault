@@ -2982,6 +2982,7 @@ kbd.pill {
 }
 
 .jira-extra-meta,
+.jira-defaults-notice,
 .jira-person {
   display: flex;
   align-items: center;

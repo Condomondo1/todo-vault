@@ -4598,3 +4598,52 @@ field, which is how the old JSON box's note looked too. It is now
 The `jira-mapping`, `jira-push` and `jira-push-pane` specs pass. **Not
 verified:** the countdown, which no e2e drives because the fake Jira never
 answers 429.
+
+## Older `defaults` convert to extra fields in the app ✅ built and driven
+
+`defaults` is the map's older form of extra fields. It is always sent, holds
+no names, and has no per-type limit, so a field there goes to issue types whose
+screen lacks it. The panel never showed it, so a map started by hand kept it
+forever. The Mapping tab now offers to move it.
+
+**Offered, and written only on Save.** When the loaded map's `defaults` isn't
+empty, Extra fields shows *N fields use the older `defaults` form.* with
+Convert. Convert adds each entry to the draft's extra fields, the way a newly
+added field is added:
+- `always`
+- named from the project
+- limited to the chosen types whose screen has it, with no limit when all do
+- its value unchanged. It was written in Jira's shape, which `shapeFieldValue`
+  passes through.
+
+The file isn't touched until Save, like every other edit on the tab. The Save
+then carries `convertDefaults`, the ids to remove from `defaults`.
+
+**A value is never just deleted.** `mappingEdits` refuses a converted id that
+isn't among the extra fields on the same Save. The renderer sends only the ids
+still in its draft. So a converted row removed again before Save stays in
+`defaults`, and the notice offers it again.
+
+**Edge cases.**
+- An id already among the extra fields keeps that entry and drops the
+  default. The extra field was already the one being sent over it.
+- A default whose field is on none of the chosen types converts without a
+  limit, as it was sent before, and its row says *on none of the chosen
+  types*. The push's screen check then drops it per type.
+  `newExtraField` gained the same rule: it used to write `issueTypes: []`,
+  which the map can't hold and which saved as unlimited without saying so.
+
+**Comments survive.** The removals are path edits, so the block's comments
+stay. When every entry goes, the block is set to `{}` rather than deleted,
+which is how the example file writes an empty block.
+
+**Tests.** Two unit tests in `jira-mapping.test.ts`, against a real file:
+- a partial conversion keeps the other entry and the comment, and a full one
+  leaves `defaults: {}`
+- a conversion without the matching extra field is refused
+
+One e2e case: a hand-written `defaults.customfield_10001: { id: t1 }` shows the
+notice. Convert gives a Team row on Epic, Story and Task with Platform
+selected, and the file is unchanged until Save. After Save, the file has the
+extra field, `defaults: {}`, and a clean commit. **Not driven:** the *on none of
+the chosen types* note.

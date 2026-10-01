@@ -51,8 +51,10 @@ export function normaliseProjectKey(raw: string): string {
  * means the renderer cannot aim a push anywhere. `cloudId` is removed for a
  * classic token rather than left stale from a scoped one.
  *
- * `fields.epicLink`, `priorities`, `statusTransitions` and `defaults` are not
- * touched: the panel does not show them, so it has no business changing them.
+ * `fields.epicLink`, `priorities` and `statusTransitions` are not touched:
+ * the panel does not show them, so it has no business changing them.
+ * `defaults` is touched only to remove what `convertDefaults` names, which
+ * the same Save writes into `extraFields`.
  * `extraFields` and `people` are the panel's when the choice carries them, and
  * then an entry missing from the choice is removed. That's why `current`, the
  * map as it is on disk, is needed: a removal is an edit to a key the choice no
@@ -61,7 +63,7 @@ export function normaliseProjectKey(raw: string): string {
 export function mappingEdits(
   choice: JiraMappingChoice,
   credential: Pick<StoredJiraCredential, "site" | "auth" | "cloudId">,
-  current: Pick<JiraMap, "extraFields" | "people"> | null = null,
+  current: Pick<JiraMap, "extraFields" | "people" | "defaults"> | null = null,
 ): JiraMapEdit[] {
   const edits: JiraMapEdit[] = [
     { path: ["jiraProjectKey"], value: normaliseProjectKey(choice.projectKey) },
@@ -98,6 +100,9 @@ export function mappingEdits(
     const chosen = peopleEntries(choice.people);
     edits.push(...blockEdits("people", chosen, Object.keys(current?.people ?? {})));
   }
+  if (choice.convertDefaults?.length) {
+    edits.push(...convertedDefaultEdits(choice, Object.keys(current?.defaults ?? {})));
+  }
 
   return edits;
 }
@@ -121,6 +126,25 @@ function blockEdits(block: string, chosen: Array<[string, unknown]>, existing: s
     ...existing.filter((key) => !keep.has(key)).map((key) => ({ path: [block, key], value: undefined })),
     ...chosen.map(([key, value]) => ({ path: [block, key], value })),
   ];
+}
+
+/**
+ * Removing converted entries from `defaults`.
+ *
+ * Refused unless every converted id is in `extraFields` on the same Save, so a
+ * conversion can never just delete a value. An emptied block is written as
+ * `{}`, the way the example file writes an empty block, not deleted.
+ */
+function convertedDefaultEdits(choice: JiraMappingChoice, existing: string[]): JiraMapEdit[] {
+  const converting = new Set((choice.convertDefaults ?? []).filter((id) => existing.includes(id)));
+  for (const id of converting) {
+    if (!choice.extraFields || !(id in choice.extraFields)) {
+      throw new Error(`${id} is being moved out of defaults, but is not among the extra fields to save.`);
+    }
+  }
+  if (converting.size === 0) return [];
+  if (existing.every((id) => converting.has(id))) return [{ path: ["defaults"], value: {} }];
+  return [...converting].map((id) => ({ path: ["defaults", id], value: undefined }));
 }
 
 /**
@@ -196,6 +220,7 @@ export function mapState(map: JiraMap, meta?: ProjectMeta): JiraMapState {
       ]),
     ),
     people: Object.fromEntries(Object.entries(map.people).map(([person, link]) => [person, { ...link }])),
+    defaults: { ...map.defaults },
     ...(gaps ? { gaps } : {}),
   };
 }
