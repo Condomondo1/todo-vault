@@ -105,10 +105,32 @@ describe("the scratch pad, driven end to end", { concurrency: 1 }, () => {
       (texts) => texts.includes("n x j quick one"),
     );
     assert.equal(await page.locator("form.modal").count(), 0, "no dialog opened while typing in the box");
-    // Emptied once main has answered, which is just after the file lands.
     await eventually("the box to empty for the next note", () => sidebarBox().inputValue(), (value) => value === "");
     assert.equal(await sidebarBox().isVisible(), true, "and stays open");
-    assert.match(await toast().innerText(), /Added to scratch/);
+    assert.match(await toast().innerText(), /Note added to Scratch/);
+
+    await page.keyboard.press("Escape");
+    await sidebarBox().waitFor({ state: "detached" });
+    seeded += 1;
+  });
+
+  test("Ctrl+Enter adds too, and a second press straight after cannot add it twice", async () => {
+    const texts = async (): Promise<string[]> =>
+      (await (await Vault.open(harness.vaultRoot)).listScratch()).notes.map((n) => n.text);
+
+    await section().locator(".add-btn").click();
+    await sidebarBox().waitFor({ state: "visible" });
+    await sidebarBox().pressSequentially("added with ctrl enter");
+    // The second press lands while the first save is still a commit in flight.
+    await page.keyboard.press("Control+Enter");
+    await page.keyboard.press("Control+Enter");
+
+    // Emptied as it is sent, not once it lands, so there is nothing to send again.
+    assert.equal(await sidebarBox().inputValue(), "");
+    await eventually("the note to reach disk", texts, (all) => all.includes("added with ctrl enter"));
+    await toast().getByText("Note added to Scratch").waitFor({ state: "visible" });
+    assert.equal((await texts()).filter((t) => t === "added with ctrl enter").length, 1, "saved once");
+    assert.equal(await sidebarBox().evaluate((el) => el === document.activeElement), true, "and kept focus");
 
     await page.keyboard.press("Escape");
     await sidebarBox().waitFor({ state: "detached" });
@@ -179,7 +201,7 @@ describe("the scratch pad, driven end to end", { concurrency: 1 }, () => {
     await eventually("the note to leave scratch/", noteFiles, (files) => !files.includes(`${id}.md`));
     assert.ok((await trashedFiles()).some((f) => f.startsWith(id)), "and land in .trash/scratch");
     await eventually("the card to leave the page", () => cards().count(), (n) => n === seeded - 1);
-    // The earlier "Added to scratch" notice can still be up for a moment; the
+    // The earlier "Note added to Scratch" notice can still be up for a moment; the
     // undo toast takes its slot once main has answered.
     await toast().getByRole("button", { name: "Undo" }).waitFor({ state: "visible" });
     assert.match(await toast().innerText(), /Trashed a scratch note/);

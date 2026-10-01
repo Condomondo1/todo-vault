@@ -193,8 +193,9 @@ export function App(): React.JSX.Element {
   const [summaryFocus, setSummaryFocus] = useState<number | null>(null);
   const promotingRef = useRef<string | null>(null);
   const lastPanelNote = useRef<ScratchNote | null>(null);
-  // A passing message with at most one action, for what is not an Undo: "Added
-  // to scratch · Open". The undo toast, when there is one, takes the slot first.
+  // A passing message with at most one action, for what is not an Undo: "Note
+  // added to Scratch · Open". The undo toast, when there is one, takes the slot
+  // first.
   const [notice, setNotice] = useState<{ message: string; action?: { label: string; run: () => void } } | null>(null);
   const [claudeOpen, setClaudeOpen] = useState(false);
   /** The keys the push pane is open for, or null when it is closed. */
@@ -550,7 +551,7 @@ export function App(): React.JSX.Element {
       const { error, note } = await vault.addScratch(text);
       if (error || !note) return error;
       if (view !== "scratch") {
-        setNotice({ message: "Added to scratch", action: { label: "Open", run: () => showScratch(note.id) } });
+        setNotice({ message: "Note added to Scratch", action: { label: "Open", run: () => showScratch(note.id) } });
       }
       return null;
     },
@@ -575,7 +576,7 @@ export function App(): React.JSX.Element {
       if (fromSidebar && view !== "scratch" && firstLine) {
         const opened = firstLine;
         setNotice({
-          message: `Added ${lines.length} notes to scratch`,
+          message: `${lines.length} notes added to Scratch`,
           action: { label: "Open", run: () => showScratch(opened.id) },
         });
       }
