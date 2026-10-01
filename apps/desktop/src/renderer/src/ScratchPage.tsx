@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { ScratchNote } from "todo-vault";
 
 import { Markdown } from "./Markdown";
+import { PastePrompt } from "./PastePrompt";
 import { shortAge } from "./scratch";
+import { usePasteSplit } from "./usePasteSplit";
 
 /**
  * The Scratch page: a capture box, then every note, newest first.
@@ -18,6 +20,7 @@ export function ScratchPage({
   focusToken,
   onSelect,
   onAdd,
+  onAddMany,
   onRemove,
   onOpenLink,
 }: {
@@ -28,6 +31,8 @@ export function ScratchPage({
   onSelect: (id: string | null) => void;
   /** Resolves to an error message, or null once the note is saved. */
   onAdd: (text: string) => Promise<string | null>;
+  /** One note per line, for a paste the person chose to split. Same resolve as onAdd. */
+  onAddMany: (lines: string[]) => Promise<string | null>;
   onRemove: (id: string) => void;
   onOpenLink: (href: string) => void;
 }): React.JSX.Element {
@@ -46,6 +51,8 @@ export function ScratchPage({
       ?.querySelector('[aria-selected="true"]')
       ?.scrollIntoView({ block: "nearest" });
   }, [selectedId]);
+
+  const paste = usePasteSplit({ draft, setDraft, addNotes: onAddMany });
 
   const submit = async (): Promise<void> => {
     if (!draft.trim()) return;
@@ -69,19 +76,38 @@ export function ScratchPage({
           placeholder="Jot something down… a snippet, a link, half a thought."
           aria-label="New scratch note"
           onChange={(e) => setDraft(e.target.value)}
+          onPaste={paste.onPaste}
           onKeyDown={(e) => {
             // Not stopped from reaching the window: its handler already ignores
             // bare keys aimed at a text field, and Ctrl-K has to keep working here.
             if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
               e.preventDefault();
+              // Enter on a pasted list is the answer "one note", as Escape is.
+              paste.keepOne();
               void submit();
             } else if (e.key === "Escape") {
               e.preventDefault();
+              if (paste.isAsking) {
+                // Answers the question and nothing else: the box keeps focus,
+                // which the window's own Escape (blur) would otherwise take.
+                e.stopPropagation();
+                paste.keepOne();
+                return;
+              }
               e.currentTarget.blur();
               if (selectedId === null && notes.length > 0) onSelect(notes[0].id);
             }
           }}
         />
+        {paste.lines !== null && (
+          <PastePrompt
+            lines={paste.lines}
+            busy={paste.busy}
+            error={paste.error}
+            onSplit={() => void paste.splitAll()}
+            onKeep={paste.keepOne}
+          />
+        )}
         <div className="capture-foot">
           <span>
             <kbd>Enter</kbd> add <kbd>Shift+Enter</kbd> newline <kbd>Esc</kbd> leave the box

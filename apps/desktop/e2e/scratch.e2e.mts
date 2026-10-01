@@ -30,7 +30,7 @@ describe("the scratch pad, driven end to end", { concurrency: 1 }, () => {
   const rows = () => section().locator(".scratch-row");
   const cards = () => page.locator(".scratch-card");
   const box = () => page.locator(".capture textarea");
-  const sidebarBox = () => section().locator(".sb-add input");
+  const sidebarBox = () => section().locator(".sb-add textarea");
   const toast = () => page.locator(".toast");
   const noteFiles = async (): Promise<string[]> =>
     (await fs.readdir(path.join(harness.vaultRoot, "scratch"))).filter((f) => f.endsWith(".md"));
