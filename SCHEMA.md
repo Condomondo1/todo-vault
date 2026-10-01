@@ -17,11 +17,15 @@ vault/
 ├── attachments/
 │   └── ACME-2/              files copied into the vault
 │       └── target-schema.md
+├── scratch/                 the scratch pad, one file per note
+│   └── 7c1f…e2.md           named by the note's id
 ├── .trash/                  deleted, recoverable
 │   ├── items/
 │   │   └── ACME-9-2026-07-25T13-06-03-925Z.md
-│   └── projects/
-│       └── OLD-2026-07-25T13-06-03-925Z.md
+│   ├── projects/
+│   │   └── OLD-2026-07-25T13-06-03-925Z.md
+│   └── scratch/
+│       └── 7c1f…e2-2026-10-01T14-02-11-123Z.md
 ├── jira-map.yaml            how this vault maps onto a Jira instance
 └── .counters.json           highest key issued per project
 ```
@@ -226,6 +230,43 @@ Keys are never recycled: `.counters.json` holds the high-water mark, so trashing
 `deleteProject` refuses while the project still holds items. With `cascade` it
 trashes them alongside, but as separate entries, so a project can be restored
 without everything that was once in it.
+
+## Scratch notes
+
+The scratch pad holds text that is not an item yet: no key, no project, no
+type, and nothing `buildPushPlan` will ever see. A note is
+`scratch/<id>.md`:
+
+```markdown
+---
+id: 7c1f3a52-0d4e-4b8e-9a51-2f6d1c0b93e2
+created: 2026-10-01T14:02:11.123Z
+---
+
+  retry: 3
+  backoff: exponential
+```
+
+The body is the note, kept as written apart from leading blank lines and
+trailing whitespace. Unlike an item's description it is not trimmed at the
+start, so a pasted snippet keeps the indentation of its first line. The id
+is a UUID and is also the filename; a file whose `id` disagrees with its name
+is reported as broken rather than trusted.
+
+One file per note, not one shared list, for the reason items are flat: the
+app and the MCP server write at the same time, and a shared file is
+read-modify-write, so one writer's change would be lost. Adding, removing and
+restoring each touch exactly one file.
+
+`load()` does not read `scratch/`. `listScratch()` reads the folder on every
+call, newest first, and returns a broken file in `errors` instead of throwing.
+`doctor` reports those errors too. The folder is created on the first add;
+vaults made before the pad have none.
+
+Removing a note moves it to `.trash/scratch/<id>-<timestamp>.md`, and
+`restoreScratch` puts it back byte for byte. The frontmatter schema is
+passthrough rather than strict, so a field added by a newer build does not
+make an older one drop the note.
 
 ## Hiding a project
 
