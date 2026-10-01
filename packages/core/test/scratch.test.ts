@@ -150,6 +150,56 @@ test("restore refuses to overwrite a note that is back on the pad", async () => 
   assert.ok(await fs.stat(trashed)); // left where it was
 });
 
+test("an edit replaces the text and keeps the id, created and the note's place", async () => {
+  const vault = await tmpVault();
+  const older = await vault.addScratch("Ask Dana abut the questionnaire");
+  await new Promise((r) => setTimeout(r, 5));
+  const newer = await vault.addScratch("newer");
+
+  const snippet = "  Ask Dana about the questionnaire\n\n  and the SOW";
+  const edited = await vault.updateScratch(older.id, `\r\n${snippet.replace(/\n/g, "\r\n")}  \n`);
+  assert.deepEqual(edited, { ...older, text: snippet });
+  assert.equal(
+    await fs.readFile(path.join(vault.root, "scratch", `${older.id}.md`), "utf8"),
+    `---\nid: ${older.id}\ncreated: ${older.created}\n---\n\n${snippet}\n`,
+  );
+  assert.deepEqual((await vault.listScratch()).notes, [newer, edited]);
+});
+
+test("an edit keeps a frontmatter field it does not know", async () => {
+  const vault = await tmpVault();
+  await vault.ensureScratchDir();
+  const id = "55555555-5555-4555-8555-555555555555";
+  const file = path.join(vault.root, "scratch", `${id}.md`);
+  await fs.writeFile(file, `---\nid: ${id}\ncreated: 2026-10-01T00:00:00.000Z\nmono: true\n---\n\nold\n`);
+
+  await vault.updateScratch(id, "new");
+  assert.equal(
+    await fs.readFile(file, "utf8"),
+    `---\nid: ${id}\ncreated: 2026-10-01T00:00:00.000Z\nmono: true\n---\n\nnew\n`,
+  );
+});
+
+test("an edit refuses blank, oversized, missing and broken notes, and leaves the file alone", async () => {
+  const vault = await tmpVault();
+  const note = await vault.addScratch("keep me");
+  const file = path.join(vault.root, "scratch", `${note.id}.md`);
+  const before = await fs.readFile(file, "utf8");
+
+  await assert.rejects(vault.updateScratch(note.id, " \n"), /needs some text/);
+  await assert.rejects(vault.updateScratch(note.id, "x".repeat(SCRATCH_MAX_CHARS + 1)), /limit is 100,000/);
+  assert.equal(await fs.readFile(file, "utf8"), before);
+
+  await assert.rejects(vault.updateScratch("../items/ACME-1", "x"), /Not a scratch note id/);
+  await vault.removeScratch(note.id);
+  await assert.rejects(vault.updateScratch(note.id, "edited after a remove"), /No scratch note/);
+  assert.deepEqual((await vault.listScratch()).notes, []);
+
+  const broken = "66666666-6666-4666-8666-666666666666";
+  await fs.writeFile(path.join(vault.root, "scratch", `${broken}.md`), "---\nid: [\n---\n\nbad\n");
+  await assert.rejects(vault.updateScratch(broken, "x"), /no longer reads as a note/);
+});
+
 test("ids and trash filenames from outside never name a path", async () => {
   const vault = await tmpVault();
   await assert.rejects(vault.removeScratch("../items/ACME-1"), /Not a scratch note id/);
@@ -208,6 +258,20 @@ test("add, remove and restore are one commit each, and History shows them", asyn
   assert.equal(added?.files[0]?.title, "Book the dentist");
   assert.equal(trashed?.files[0]?.kind, "trashed");
   assert.equal(restored?.files[0]?.kind, "restored");
+});
+
+test("an edit is one commit, and saving the same text again makes none", async () => {
+  const vault = await gitVault();
+  const note = await vault.addScratch("Book the dentist");
+  await vault.updateScratch(note.id, "Book the dentist for Tuesday");
+  await vault.updateScratch(note.id, "Book the dentist for Tuesday\n");
+
+  assert.deepEqual((await subjects(vault.root)).slice(0, 2), ["Edit scratch note", "Add scratch note"]);
+  const [edited] = (await vault.history()).entries;
+  assert.equal(edited?.files.length, 1);
+  assert.equal(edited?.files[0]?.subject, "scratch");
+  assert.equal(edited?.files[0]?.key, note.id);
+  assert.equal(edited?.files[0]?.title, "Book the dentist for Tuesday");
 });
 
 test("keyFromPath reads both scratch locations", () => {
