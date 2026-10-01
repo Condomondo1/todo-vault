@@ -40,7 +40,8 @@ every keyboard shortcut, and `Ctrl+K` to search everything.
 
 **A scratch pad.** The sidebar has a Scratch section on every view: the newest
 notes, a count, and a **+ new** (or `Shift+N`) that jots a note without leaving
-what you are doing. **More…** (or `6`) opens the full page. Notes are global,
+what you are doing. Pasting several lines asks once whether they are one note or
+one per line. **More…** (or `6`) opens the full page. Notes are global,
 not filed under any project, and each is one file in `scratch/`. Removing one
 sends it to the trash with an Undo. Select a note and a panel opens beside
 it with the item form already filled from the note's text (a local guess, not a

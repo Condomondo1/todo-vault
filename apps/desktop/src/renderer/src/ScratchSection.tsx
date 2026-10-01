@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { ScratchNote } from "todo-vault";
 
+import { PastePrompt } from "./PastePrompt";
 import { SIDEBAR_NOTES, firstLine, noteCount, shortAge } from "./scratch";
+import { usePasteSplit } from "./usePasteSplit";
 
 /**
  * The sidebar's Scratch section, built like Projects: a header with the count and
@@ -19,6 +21,7 @@ export function ScratchSection({
   adding,
   onAddingChange,
   onAdd,
+  onAddMany,
   onOpenNote,
   onMore,
   onNew,
@@ -33,6 +36,8 @@ export function ScratchSection({
   onAddingChange: (adding: boolean) => void;
   /** Resolves to an error message, or null once the note is saved. */
   onAdd: (text: string) => Promise<string | null>;
+  /** One note per line, for a paste the person chose to split. Same resolve as onAdd. */
+  onAddMany: (lines: string[]) => Promise<{ saved: number; error: string | null }>;
   onOpenNote: (id: string) => void;
   onMore: () => void;
   /** The "+ new" button. On the page itself App focuses the page's own box. */
@@ -40,7 +45,8 @@ export function ScratchSection({
 }): React.JSX.Element {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const paste = usePasteSplit({ draft, setDraft, addNotes: onAddMany });
 
   useEffect(() => {
     if (adding) inputRef.current?.focus();
@@ -79,24 +85,46 @@ export function ScratchSection({
 
       {adding && (
         <div className="sb-add">
-          <input
+          {/* A textarea that looks like one line, so a multi-line paste is kept
+              rather than flattened by an <input>, and asks the same question the
+              page's box does. */}
+          <textarea
             ref={inputRef}
             value={draft}
+            rows={Math.min(4, Math.max(1, draft.split("\n").length))}
             placeholder="Jot it down… Enter to add, Esc to close"
             aria-label="New scratch note"
             onChange={(e) => setDraft(e.target.value)}
+            onPaste={paste.onPaste}
             onKeyDown={(e) => {
               // Not stopped from reaching the window: its handler already ignores
               // bare keys aimed at a text field, and Ctrl-K has to keep working here.
-              if (e.key === "Enter") {
+              if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
                 e.preventDefault();
+                paste.keepOne();
                 void submit();
               } else if (e.key === "Escape") {
+                if (paste.isAsking) {
+                  // Answers the question and nothing else: the box stays open and
+                  // focused, which the window's own Escape (blur) would undo.
+                  e.stopPropagation();
+                  paste.keepOne();
+                  return;
+                }
                 setError(null);
                 onAddingChange(false);
               }
             }}
           />
+          {paste.lines !== null && (
+            <PastePrompt
+              lines={paste.lines}
+              busy={paste.busy}
+              error={paste.error}
+              onSplit={() => void paste.splitAll()}
+              onKeep={paste.keepOne}
+            />
+          )}
           {error && <div className="sb-error">{error}</div>}
         </div>
       )}

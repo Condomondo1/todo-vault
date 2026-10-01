@@ -555,6 +555,33 @@ export function App(): React.JSX.Element {
     [vault, view, showScratch],
   );
 
+  /**
+   * One note per pasted line, for a paste the person chose to split. Added last
+   * line first, so the notes read top to bottom in the order they were pasted
+   * (the list is newest first). Stops at the first refusal and says which.
+   */
+  const addManyNotes = useCallback(
+    async (lines: string[], fromSidebar: boolean): Promise<{ saved: number; error: string | null }> => {
+      let firstLine: ScratchNote | null = null;
+      let saved = 0;
+      for (const text of [...lines].reverse()) {
+        const { error, note } = await vault.addScratch(text);
+        if (error || !note) return { saved, error: error ?? "That note could not be saved." };
+        firstLine = note;
+        saved += 1;
+      }
+      if (fromSidebar && view !== "scratch" && firstLine) {
+        const opened = firstLine;
+        setNotice({
+          message: `Added ${lines.length} notes to scratch`,
+          action: { label: "Open", run: () => showScratch(opened.id) },
+        });
+      }
+      return { saved, error: null };
+    },
+    [vault, view, showScratch],
+  );
+
   /** Add a note from the page's own box. The note is already on screen, so no toast. */
   const addNoteFromPage = useCallback(
     async (text: string): Promise<string | null> => (await vault.addScratch(text)).error,
@@ -975,6 +1002,9 @@ export function App(): React.JSX.Element {
           setView("history");
           return;
         case "6":
+          // Cancelled so the key's own character is not typed into the capture
+          // box that this is about to focus.
+          event.preventDefault();
           showScratch();
           return;
         // Gated on the board rather than global: it is the only view with lanes,
@@ -1212,6 +1242,7 @@ export function App(): React.JSX.Element {
           adding={scratchAdding}
           onAddingChange={setScratchAdding}
           onAdd={addNoteFromSidebar}
+          onAddMany={(lines) => addManyNotes(lines, true)}
           onOpenNote={(id) => showScratch(id)}
           onMore={() => showScratch()}
           /* On the page the page's own box is the place to type. */
@@ -1736,6 +1767,7 @@ export function App(): React.JSX.Element {
               focusToken={captureFocus}
               onSelect={setScratchSel}
               onAdd={addNoteFromPage}
+              onAddMany={(lines) => addManyNotes(lines, false)}
               onRemove={(id) => void removeNote(id)}
               onOpenLink={(href) => void window.vault.openTarget({ kind: "external", value: href })}
             />
