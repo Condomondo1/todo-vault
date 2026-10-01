@@ -42,6 +42,7 @@ const api: VaultApi = {
   removeScratch: (id) => ipcRenderer.invoke(CHANNELS.removeScratch, id),
   listTrashedScratch: () => ipcRenderer.invoke(CHANNELS.listTrashedScratch),
   restoreScratch: (file) => ipcRenderer.invoke(CHANNELS.restoreScratch, file),
+  promoteScratch: (id, input, keep) => ipcRenderer.invoke(CHANNELS.promoteScratch, id, input, keep),
   createProject: (input) => ipcRenderer.invoke(CHANNELS.createProject, input),
   updateProject: (key, patch) => ipcRenderer.invoke(CHANNELS.updateProject, key, patch),
   moveProject: (key, position) => ipcRenderer.invoke(CHANNELS.moveProject, key, position),

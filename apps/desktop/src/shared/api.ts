@@ -576,6 +576,18 @@ export interface VaultApi {
   removeScratch(id: string): Promise<Result<{ snapshot: VaultSnapshot; removed: RemoveScratchResult }>>;
   listTrashedScratch(): Promise<Result<ScratchTrashEntry[]>>;
   restoreScratch(file: string): Promise<Result<{ snapshot: VaultSnapshot; note: ScratchNote }>>;
+  /**
+   * Turn a note into an item in one commit. `keep` leaves the note on the pad.
+   *
+   * A failure whose message starts "Created KEY, but the note stayed" means the
+   * item IS written; the renderer treats it as created, because a retry would
+   * make the item twice. It arrives as a failure, so no snapshot comes with it.
+   */
+  promoteScratch(
+    id: string,
+    input: CreateItemInput,
+    keep: boolean,
+  ): Promise<Result<{ snapshot: VaultSnapshot; item: Item }>>;
 
   createProject(input: {
     key: string;
@@ -744,6 +756,7 @@ export const CHANNELS = {
   removeScratch: "scratch:remove",
   listTrashedScratch: "scratch:list-trash",
   restoreScratch: "scratch:restore",
+  promoteScratch: "scratch:promote",
   createProject: "vault:create-project",
   updateProject: "vault:update-project",
   moveProject: "vault:move-project",

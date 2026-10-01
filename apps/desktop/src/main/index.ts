@@ -10,6 +10,7 @@ import {
   loadJiraMap,
   searchAssignable,
   searchUsers,
+  type CreateItemInput,
   type HistoryQuery,
   type Status,
   type TurnOnHistoryOptions,
@@ -451,6 +452,10 @@ function registerHandlers(): void {
     return { snapshot: await service.snapshot(), removed };
   });
   handle(CHANNELS.listTrashedScratch, () => service.listTrashedScratch());
+  handle(CHANNELS.promoteScratch, async (id: string, input: CreateItemInput, keep: boolean) => {
+    const item = await service.promoteScratch(id, input, keep === true);
+    return { snapshot: await service.snapshot(), item };
+  });
   handle(CHANNELS.restoreScratch, async (file: string) => {
     const note = await service.restoreScratch(file);
     return { snapshot: await service.snapshot(), note };

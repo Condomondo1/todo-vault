@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // The constants subpath, not the package root — see the note at the top of
 // pieces.tsx: the root pulls vault.js, and node:fs with it, into the bundle.
 import { ITEM_TYPES, type ItemType } from "todo-vault/constants";
-import type { Item, ScratchNote, Status } from "todo-vault";
+import type { CreateItemInput, Item, ScratchNote, Status } from "todo-vault";
 import type { AgendaScope, ProjectSummary, ThemePreference } from "@shared/api";
 
 import { useVault } from "./useVault";
@@ -19,6 +19,7 @@ import { ProjectDialog } from "./ProjectDialog";
 import { TrashPanel } from "./TrashPanel";
 import { HiddenPanel } from "./HiddenPanel";
 import { CommandPalette } from "./CommandPalette";
+import { PromotePanel, type StickyFields } from "./PromotePanel";
 import { ScratchPage } from "./ScratchPage";
 import { ScratchSection } from "./ScratchSection";
 import { selectionAfterRemove, stepNote } from "./scratch";
@@ -182,6 +183,14 @@ export function App(): React.JSX.Element {
   // alone, which is what opening a particular note wants.
   const [captureFocus, setCaptureFocus] = useState<number | null>(null);
   const [version, setVersion] = useState<string | null>(null);
+  // The promote panel. What the last promote used, kept here so it survives the
+  // panel closing; a number that asks the panel's Summary for focus; and the
+  // note being promoted, so the panel is not torn down in the instant between
+  // the snapshot losing that note and the selection moving to the next one.
+  const stickyRef = useRef<StickyFields | null>(null);
+  const [summaryFocus, setSummaryFocus] = useState<number | null>(null);
+  const promotingRef = useRef<string | null>(null);
+  const lastPanelNote = useRef<ScratchNote | null>(null);
   // A passing message with at most one action, for what is not an Undo: "Added
   // to scratch · Open". The undo toast, when there is one, takes the slot first.
   const [notice, setNotice] = useState<{ message: string; action?: { label: string; run: () => void } } | null>(null);
@@ -244,6 +253,13 @@ export function App(): React.JSX.Element {
   // effect would clear the selection the moment the snapshot lost the note, ahead
   // of removeNote moving it to the neighbour.
   const scratchSelected = scratch.some((note) => note.id === scratchSel) ? scratchSel : null;
+  const scratchNote = scratch.find((note) => note.id === scratchSel) ?? null;
+  if (scratchNote) lastPanelNote.current = scratchNote;
+  // The panel shows the selected note. Mid-promote that note is already gone from
+  // the snapshot while the selection has not moved yet; the last one stands in
+  // for that moment so the panel keeps its form and its focus.
+  const panelNote =
+    scratchNote ?? (promotingRef.current !== null && promotingRef.current === scratchSel ? lastPanelNote.current : null);
 
   /**
    * The hiding split, computed once.
@@ -545,6 +561,40 @@ export function App(): React.JSX.Element {
     [vault],
   );
 
+  /**
+   * Promote a note into an item, then move on: the next note is selected and the
+   * panel refills from it. Not `vault.createItem`, whose lastCreated would open
+   * the new item's panel over the form (Finding 15); the toast's Open is the way
+   * to it. The item counts as created even when the core says the note stayed on
+   * the pad, since a retry would make it twice.
+   */
+  const promoteNote = useCallback(
+    async (id: string, input: CreateItemInput, keep: boolean) => {
+      const next = keep ? null : selectionAfterRemove(scratch, id);
+      promotingRef.current = id;
+      const result = await vault.promoteScratch(id, input, keep);
+      if (!result.createdKey) {
+        promotingRef.current = null;
+        return { error: result.error, createdKey: null };
+      }
+      const key = result.createdKey;
+      stickyRef.current = {
+        project: input.project,
+        parent: input.parent ?? "",
+        category: input.category ?? "",
+      };
+      vault.dismissUndo();
+      setNotice({
+        message: `Created ${key}${keep ? " · note kept" : ""}`,
+        action: { label: "Open", run: () => open(key) },
+      });
+      if (!keep && !result.error) setScratchSel((current) => (current === id ? next : current));
+      promotingRef.current = null;
+      return { error: result.error, createdKey: key };
+    },
+    [scratch, vault, open],
+  );
+
   /** Remove a note and move the selection to its neighbour, as `x` does in the backlog. */
   const removeNote = useCallback(
     async (id: string) => {
@@ -829,11 +879,16 @@ export function App(): React.JSX.Element {
             event.preventDefault();
             focusCapture();
             return;
-          // Promote is not built yet; until it is, these must still not fall
-          // through to the item shortcuts below, which would act on whatever
-          // item was selected before the page was opened.
+          // Into the promote panel's Summary. These must not fall through to
+          // the item shortcuts below, which would act on whatever item was
+          // selected before the page was opened.
           case "Enter":
           case "p":
+            if (scratchSelected) {
+              event.preventDefault();
+              setSummaryFocus((n) => (n ?? 0) + 1);
+            }
+            return;
           // The filter row is hidden here, so "/" would focus an input nobody can see.
           case "/":
           case "e":
@@ -1607,7 +1662,11 @@ export function App(): React.JSX.Element {
           </div>
         )}
 
-        <div className={`content${bulkBarOpen ? " content-with-bulk-bar" : ""}`}>
+        <div
+          className={`content${bulkBarOpen ? " content-with-bulk-bar" : ""}${
+            view === "scratch" && panelNote ? " content-with-promote" : ""
+          }`}
+        >
           {view === "backlog" && (
             <BacklogTable
               items={filtered}
@@ -1713,6 +1772,21 @@ export function App(): React.JSX.Element {
           />
         )}
       </main>
+
+      {view === "scratch" && panelNote && (
+        <PromotePanel
+          note={panelNote}
+          /* The same lists the New item dialog gets, hidden projects dropped. */
+          projects={visibleProjects}
+          items={visibleItems}
+          reporters={allReporters}
+          defaultProject={project}
+          sticky={stickyRef.current}
+          focusToken={summaryFocus}
+          onClose={() => setScratchSel(null)}
+          onPromote={promoteNote}
+        />
+      )}
 
       {detailItem && (
         <ItemDetail

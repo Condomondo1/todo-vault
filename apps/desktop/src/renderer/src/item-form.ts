@@ -24,7 +24,9 @@ export interface ItemFormValues {
 }
 
 /** The fields a caller may set when it opens the form. Everything else starts empty. */
-export type ItemFormSeed = Partial<Pick<ItemFormValues, "project" | "type" | "parent" | "summary" | "description">>;
+export type ItemFormSeed = Partial<
+  Pick<ItemFormValues, "project" | "type" | "parent" | "summary" | "description" | "category">
+>;
 
 /**
  * What survives from one item to the next when the form is refilled from a new
@@ -45,7 +47,7 @@ export function initialValues(projects: { key: string }[], seed: ItemFormSeed = 
     priority: "medium",
     parent: seed.parent ?? "",
     dueDate: "",
-    category: "",
+    category: seed.category ?? "",
     labels: "",
     cadence: "none",
     reporter: "",
