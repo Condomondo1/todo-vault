@@ -9,8 +9,8 @@ import { SIDEBAR_NOTES, firstLine, noteCount, shortAge } from "./scratch";
  *
  * It is on every view, because jotting something down should not mean leaving
  * what you are doing. Quick-add lives here: Enter adds and keeps the box open
- * for the next one, Escape closes it. The box stops its own keys from reaching
- * the window handler, so a bare `j` typed into it is a "j".
+ * for the next one, Escape closes it. A bare `j` typed into it is a "j": the
+ * window handler ignores keys aimed at a text field.
  */
 export function ScratchSection({
   notes,
@@ -86,8 +86,8 @@ export function ScratchSection({
             aria-label="New scratch note"
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              // Nothing typed here may reach the window's bare-key shortcuts.
-              e.stopPropagation();
+              // Not stopped from reaching the window: its handler already ignores
+              // bare keys aimed at a text field, and Ctrl-K has to keep working here.
               if (e.key === "Enter") {
                 e.preventDefault();
                 void submit();

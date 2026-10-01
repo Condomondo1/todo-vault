@@ -121,6 +121,15 @@ describe("the scratch pad, driven end to end", { concurrency: 1 }, () => {
 
     await sidebarBox().waitFor({ state: "visible" });
     assert.equal(await sidebarBox().evaluate((el) => el === document.activeElement), true);
+
+    // Ctrl-K is the one shortcut that works while typing, so it must still reach
+    // the window from inside the box.
+    await page.keyboard.press("Control+K");
+    await page.locator(".palette-input").waitFor({ state: "visible" });
+    await page.keyboard.press("Escape");
+    await page.locator(".palette-input").waitFor({ state: "detached" });
+
+    await sidebarBox().focus();
     await page.keyboard.press("Escape");
     await sidebarBox().waitFor({ state: "detached" });
   });
@@ -133,6 +142,17 @@ describe("the scratch pad, driven end to end", { concurrency: 1 }, () => {
     assert.equal(await box().evaluate((el) => el === document.activeElement), true);
     assert.equal(await cards().count(), seeded);
     assert.equal(await page.locator("input[type=search]").count(), 0, "the filter row is hidden here");
+  });
+
+  test("Ctrl-K opens the search from inside the capture box", async () => {
+    assert.equal(await box().evaluate((el) => el === document.activeElement), true);
+
+    await page.keyboard.press("Control+K");
+    await page.locator(".palette-input").waitFor({ state: "visible" });
+    await page.keyboard.press("Escape");
+    await page.locator(".palette-input").waitFor({ state: "detached" });
+
+    await box().focus();
   });
 
   test("/ does nothing on Scratch, and Escape leaves the box without refocusing it", async () => {

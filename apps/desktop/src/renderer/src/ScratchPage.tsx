@@ -70,8 +70,8 @@ export function ScratchPage({
           aria-label="New scratch note"
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            // Nothing typed here may reach the window's bare-key shortcuts.
-            e.stopPropagation();
+            // Not stopped from reaching the window: its handler already ignores
+            // bare keys aimed at a text field, and Ctrl-K has to keep working here.
             if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
               e.preventDefault();
               void submit();
