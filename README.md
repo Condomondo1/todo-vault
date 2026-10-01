@@ -52,7 +52,7 @@ the next.
 
 **An MCP server.** Point Claude Desktop or Claude Code at the vault and ask in
 plain language: *"what's due this week"*, *"add a task to chase the vendor SOW,
-due Friday, under the migration epic"*. It has twenty-seven tools, and every
+due Friday, under the migration epic"*. It has thirty-two tools, and every
 write is checked against the schema and the hierarchy rules.
 
 **Push to Jira from the app.** Connect one Jira Cloud project once. Choose items
@@ -299,7 +299,7 @@ fails silently: Claude reports no error, and the tools never appear.
 Quit Desktop fully and reopen it after editing the file. Closing it to the tray
 is not quitting.
 
-The twenty-seven tools cover:
+The thirty-two tools cover:
 - **Reading:** filtered lists, a full item with children and backlinks, the
   agenda, and the project list.
 - **Writing:** create, update, move through the workflow, tick recurring work,
@@ -307,6 +307,8 @@ The twenty-seven tools cover:
 - **Projects:** create, rename (which re-keys every item), reorder, hide, and
   move an item with its subtree.
 - **Recovery:** delete to `.trash/`, list what can be restored, and restore it.
+- **Scratch pad:** add, list, remove and restore notes, and promote one into an
+  item in a single commit.
 - **Jira:** plan a push, and record one that was made.
 
 Destructive tools refuse rather than guess. For example, deleting an item with
