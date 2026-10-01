@@ -49,6 +49,7 @@ import { attachZoomShortcuts, restoreZoom } from "./zoom.js";
 import { applySavedTheme, applyTheme, backgroundColor, currentTheme } from "./theme.js";
 import { discoverSyncedRoots } from "./synced-roots.js";
 import { isInAppNavigation } from "./navigation.js";
+import { APP_NAME } from "../shared/app-name.js";
 
 const service = new VaultService();
 let mainWindow: BrowserWindow | undefined;
@@ -143,7 +144,7 @@ function createWindow(): void {
     // every launch in light mode, which is the exact thing applySavedTheme()
     // running before this call went to trouble to avoid.
     backgroundColor: backgroundColor(),
-    title: "Vault",
+    title: APP_NAME,
     autoHideMenuBar: true,
     webPreferences: {
       // CJS, which a sandboxed preload has to be. The app is not "type": "module",
@@ -574,6 +575,10 @@ function registerHandlers(): void {
       ...(u.emailAddress ? { emailAddress: u.emailAddress } : {}),
     }));
   });
+
+  // app.getVersion() reads apps/desktop/package.json, so the version the UI shows
+  // is the one npm version bumped rather than a string kept in step by hand.
+  handle(CHANNELS.getVersion, () => app.getVersion());
 
   handle(CHANNELS.clearJiraCredentials, async () => {
     await clearSecret("jira");

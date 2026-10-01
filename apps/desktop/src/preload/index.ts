@@ -78,6 +78,8 @@ const api: VaultApi = {
    * a dropped file actually lives — and it has to happen in the preload, since
    * webUtils is not exposed to the renderer.
    */
+  getVersion: () => ipcRenderer.invoke(CHANNELS.getVersion),
+
   pathsForFiles: (files) => files.map((file) => webUtils.getPathForFile(file)),
 
   onChanged: (listener: (snapshot: VaultSnapshot) => void) => {

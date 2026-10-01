@@ -667,6 +667,9 @@ export interface VaultApi {
    */
   pathsForFiles(files: File[]): string[];
 
+  /** The app's version, as package.json declares it. */
+  getVersion(): Promise<Result<string>>;
+
   /** Subscribe to disk changes. Returns an unsubscribe function. */
   onChanged(listener: (snapshot: VaultSnapshot) => void): () => void;
 
@@ -746,6 +749,7 @@ export const CHANNELS = {
   jiraResolveUncertain: "jira:resolve-uncertain",
   jiraMarkInSync: "jira:mark-in-sync",
   draftItem: "claude:draft",
+  getVersion: "app:version",
 
   /** main -> renderer push */
   changed: "vault:changed",
