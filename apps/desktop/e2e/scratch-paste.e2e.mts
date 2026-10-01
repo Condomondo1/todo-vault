@@ -6,7 +6,9 @@
  *
  * The paste is real. The text goes onto the system clipboard from the app's main
  * process and Ctrl+V does the rest, because a synthetic paste event is not
- * trusted and would not put the text in the box.
+ * trusted and would not put the text in the box. That replaces whatever was on
+ * the machine's clipboard, so it is read first and written back at the end, as
+ * text only: an image or files on it would be lost.
  *
  * Both boxes are covered: the page's capture box and the sidebar's quick-add,
  * which is a textarea so that a multi-line paste is not flattened.
@@ -35,6 +37,11 @@ describe("pasting several lines into a scratch box", { concurrency: 1 }, () => {
   const noteTexts = async (): Promise<string[]> =>
     (await (await Vault.open(harness.vaultRoot)).listScratch()).notes.map((n) => n.text);
 
+  // The clipboard belongs to the machine, not to this run's --user-data-dir, so
+  // the spec saves what was on it and puts it back. Only text is restored: an
+  // image or files on the clipboard would still be lost.
+  let savedClipboard = "";
+
   /** Put text on the clipboard and paste it into whatever has focus. */
   async function paste(text: string): Promise<void> {
     await harness.app.evaluate(({ clipboard }, value) => clipboard.writeText(value), text);
@@ -44,6 +51,7 @@ describe("pasting several lines into a scratch box", { concurrency: 1 }, () => {
   before(async () => {
     harness = await launchHarness();
     page = harness.page;
+    savedClipboard = await harness.app.evaluate(({ clipboard }) => clipboard.readText());
     await page.locator("table.table tbody tr").first().waitFor({ state: "visible" });
 
     const vault = await Vault.open(harness.vaultRoot);
@@ -60,6 +68,7 @@ describe("pasting several lines into a scratch box", { concurrency: 1 }, () => {
   });
 
   after(async () => {
+    await harness.app.evaluate(({ clipboard }, text) => clipboard.writeText(text), savedClipboard).catch(() => undefined);
     await harness.close();
   });
 

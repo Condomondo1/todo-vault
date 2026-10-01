@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { normalizePaste, splitPaste } from "./paste";
+import { normalizePaste, remainingAfter, splitPaste } from "./paste";
 
 /**
  * The paste prompt's state, shared by the two boxes that take a note.
@@ -18,8 +18,12 @@ export function usePasteSplit({
 }: {
   draft: string;
   setDraft: (next: string) => void;
-  /** Add one note per line. Resolves to an error message, or null once all are saved. */
-  addNotes: (lines: string[]) => Promise<string | null>;
+  /**
+   * Add one note per line, last line first. Resolves with how many were saved and
+   * an error message, which is null once all are. A failure part-way has still
+   * saved some, and the prompt must not offer those again.
+   */
+  addNotes: (lines: string[]) => Promise<{ saved: number; error: string | null }>;
 }) {
   const [pending, setPending] = useState<{ text: string; lines: string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,10 +59,15 @@ export function usePasteSplit({
     splitAll: async (): Promise<void> => {
       if (!pending || busy) return;
       setBusy(true);
-      const message = await addNotes(pending.lines);
+      const { saved, error: message } = await addNotes(pending.lines);
       setBusy(false);
       if (message) {
-        setError(message);
+        // What was saved stays saved; the question now covers only the rest, so a
+        // retry cannot make the same note twice.
+        if (saved > 0) setPending({ text: pending.text, lines: remainingAfter(pending.lines, saved) });
+        setError(
+          saved > 0 ? `${message} (${saved} of ${pending.lines.length} were added.)` : message,
+        );
         return;
       }
       setError(null);

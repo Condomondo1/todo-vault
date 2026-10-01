@@ -561,12 +561,14 @@ export function App(): React.JSX.Element {
    * (the list is newest first). Stops at the first refusal and says which.
    */
   const addManyNotes = useCallback(
-    async (lines: string[], fromSidebar: boolean): Promise<string | null> => {
+    async (lines: string[], fromSidebar: boolean): Promise<{ saved: number; error: string | null }> => {
       let firstLine: ScratchNote | null = null;
+      let saved = 0;
       for (const text of [...lines].reverse()) {
         const { error, note } = await vault.addScratch(text);
-        if (error || !note) return error;
+        if (error || !note) return { saved, error: error ?? "That note could not be saved." };
         firstLine = note;
+        saved += 1;
       }
       if (fromSidebar && view !== "scratch" && firstLine) {
         const opened = firstLine;
@@ -575,7 +577,7 @@ export function App(): React.JSX.Element {
           action: { label: "Open", run: () => showScratch(opened.id) },
         });
       }
-      return null;
+      return { saved, error: null };
     },
     [vault, view, showScratch],
   );

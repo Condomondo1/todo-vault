@@ -12,6 +12,17 @@
  */
 export const SPLIT_MAX_LINES = 50;
 
+/**
+ * The lines still to add after a split stopped part-way.
+ *
+ * Notes are added last line first, so a failure after `saved` of them leaves the
+ * *first* `lines.length - saved` lines unsaved. Offering the whole list again
+ * would save the ones that already exist a second time.
+ */
+export function remainingAfter(lines: string[], saved: number): string[] {
+  return lines.slice(0, Math.max(0, lines.length - saved));
+}
+
 /** Line breaks as a textarea holds them, whatever the clipboard used. */
 export function normalizePaste(text: string): string {
   return text.replace(/\r\n?/g, "\n");

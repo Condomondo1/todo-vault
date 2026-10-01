@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { SPLIT_MAX_LINES, normalizePaste, splitPaste } from "../src/renderer/src/paste.js";
+import { SPLIT_MAX_LINES, normalizePaste, remainingAfter, splitPaste } from "../src/renderer/src/paste.js";
 
 test("plain lines are offered as one note each, trimmed", () => {
   assert.deepEqual(splitPaste("Call the plumber\nOrder printer toner \n  Book dentist"), [
@@ -56,4 +56,14 @@ test("a paste too long to split sensibly is left as one note", () => {
 
   assert.equal(splitPaste(many), null);
   assert.equal(splitPaste(limit)?.length, SPLIT_MAX_LINES);
+});
+
+test("after a split stops part-way only the unsaved lines are left", () => {
+  // Notes are added last line first, so what is left is the head of the list.
+  const lines = ["a", "b", "c", "d", "e"];
+
+  assert.deepEqual(remainingAfter(lines, 0), lines, "nothing saved, everything is still on offer");
+  assert.deepEqual(remainingAfter(lines, 2), ["a", "b", "c"], "d and e were saved first");
+  assert.deepEqual(remainingAfter(lines, 5), []);
+  assert.deepEqual(remainingAfter(lines, 9), [], "never negative");
 });

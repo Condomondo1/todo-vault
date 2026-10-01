@@ -14,9 +14,9 @@ export function PastePrompt({
 }): React.JSX.Element {
   return (
     <div className="paste-prompt" role="status">
-      <span>{lines} lines pasted —</span>
+      <span>{lines === 1 ? "1 line left —" : `${lines} lines pasted —`}</span>
       <button type="button" className="btn btn-primary" disabled={busy} onClick={onSplit}>
-        {busy ? "Adding…" : `Add as ${lines} notes`}
+        {busy ? "Adding…" : lines === 1 ? "Add as 1 note" : `Add as ${lines} notes`}
       </button>
       <button type="button" className="btn" disabled={busy} onClick={onKeep}>
         Keep as 1 note

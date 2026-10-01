@@ -37,7 +37,7 @@ export function ScratchSection({
   /** Resolves to an error message, or null once the note is saved. */
   onAdd: (text: string) => Promise<string | null>;
   /** One note per line, for a paste the person chose to split. Same resolve as onAdd. */
-  onAddMany: (lines: string[]) => Promise<string | null>;
+  onAddMany: (lines: string[]) => Promise<{ saved: number; error: string | null }>;
   onOpenNote: (id: string) => void;
   onMore: () => void;
   /** The "+ new" button. On the page itself App focuses the page's own box. */
