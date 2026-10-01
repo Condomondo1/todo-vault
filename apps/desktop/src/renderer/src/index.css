@@ -3299,3 +3299,14 @@ kbd.pill {
 .promote-hint {
   margin: 0;
 }
+
+.promote-draft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.promote-draft .field-note {
+  margin: 0;
+}

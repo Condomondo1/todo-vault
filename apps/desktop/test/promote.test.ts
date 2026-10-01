@@ -31,6 +31,16 @@ test("a note that opens with a fence keeps its whole text as the description", (
   assert.equal(p.description, text, "splitting the line out would leave an unbalanced fence");
 });
 
+test("a fenced first code line over the limit is cut without printing its tail twice", () => {
+  const text = `\`\`\`sql\n${longLine(60)}\n\`\`\``;
+
+  const p = prefill(text);
+
+  assert.ok(p.summary.length <= SUMMARY_MAX);
+  assert.equal(p.cut, true);
+  assert.equal(p.description, text, "the whole note, once: the long line is already in it");
+});
+
 test("an empty note has nothing to propose", () => {
   assert.deepEqual(prefill("  \n\n"), { type: "task", summary: "", description: "", cut: false });
 });
