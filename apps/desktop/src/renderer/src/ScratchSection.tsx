@@ -161,8 +161,8 @@ export function ScratchSection({
         {(notes.length > 0 || onPage) && (
           <button className="project sb-more" aria-current={moreCurrent} onClick={onMore}>
             <span className="project-name">{hidden > 0 ? `${hidden} more…` : "More…"}</span>
-            <span className="project-count" title="Scratch (6)">
-              6
+            <span className="project-count" title={`${noteCount(notes.length)} · open Scratch (6)`}>
+              {notes.length}
             </span>
           </button>
         )}

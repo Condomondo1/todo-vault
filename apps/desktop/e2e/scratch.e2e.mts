@@ -42,6 +42,9 @@ describe("the scratch pad, driven end to end", { concurrency: 1 }, () => {
     }
   };
   const countLabel = () => section().locator(".sidebar-head .project-count");
+  const moreCount = () => section().locator(".sb-more .project-count");
+  const moreCountIs = (n: number) =>
+    eventually(`the More… row to count ${n}`, () => moreCount().innerText().catch(() => ""), (text) => text === String(n));
 
   before(async () => {
     harness = await launchHarness();
@@ -283,5 +286,23 @@ describe("the scratch pad, driven end to end", { concurrency: 1 }, () => {
     const selected = page.locator('.scratch-card[aria-selected="true"]');
     assert.equal(await selected.count(), 1);
     assert.match(await selected.innerText(), /quick one/);
+  });
+
+  test("the More… row counts only the notes still on the pad: x and promote each take one off", async () => {
+    const start = (await noteFiles()).length;
+    await moreCountIs(start);
+
+    const removed = (await page.locator('.scratch-card[aria-selected="true"]').getAttribute("data-note-id")) as string;
+    await page.locator('.scratch-card[aria-selected="true"]').locator(".scratch-x").click();
+    await eventually("the note to leave scratch/", noteFiles, (files) => !files.includes(`${removed}.md`));
+    await moreCountIs(start - 1); // the trashed note is not counted
+
+    const promoted = (await page.locator('.scratch-card[aria-selected="true"]').getAttribute("data-note-id")) as string;
+    const summary = page.locator("aside.promote label:has(> span:text-is(\"Summary\")) input");
+    await summary.waitFor({ state: "visible" });
+    await summary.focus();
+    await page.keyboard.press("Control+Enter");
+    await eventually("the promoted note to leave scratch/", noteFiles, (files) => !files.includes(`${promoted}.md`));
+    await moreCountIs(start - 2); // nor is the promoted one
   });
 });
