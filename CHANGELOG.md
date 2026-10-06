@@ -20,6 +20,11 @@ format (`SCHEMA.md`) and the MCP tool names and shapes.
   unassigned work.
 - **Filter by assignee.** The toolbar has an assignee menu, with Unassigned, on
   the backlog, board, calendar and agenda. History is not filtered.
+- **A skill for meeting transcripts.** `vault-from-meeting` reads a Plaud, Zoom
+  or Teams transcript or summary, matches what was said against the open epics
+  and tasks, and proposes numbered changes (add a comment, update a field, create
+  an epic, story or task) that you approve, deny or edit one by one, with a final
+  confirmation before anything is written.
 
 ## [0.9.0] - 2026-10-01
 
