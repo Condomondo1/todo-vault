@@ -164,6 +164,7 @@ export function Suggest({
   className,
   autoFocus,
   selectOnFocus,
+  required,
   onChange,
   onCommit,
   onCancel,
@@ -173,6 +174,7 @@ export function Suggest({
   placeholder?: string;
   className?: string;
   autoFocus?: boolean;
+  required?: boolean;
   /** Select what is there on focus, so the first keystroke replaces it. */
   selectOnFocus?: boolean;
   onChange: (next: string) => void;
@@ -237,6 +239,7 @@ export function Suggest({
         className={className}
         value={value}
         placeholder={placeholder}
+        required={required}
         onFocus={() => {
           openMenu();
           if (selectOnFocus) ref.current?.select();

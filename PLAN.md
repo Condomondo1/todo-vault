@@ -5074,3 +5074,47 @@ fix made on the card. #100 and #101 both changed `ScratchPage` and were each
 tested alone, so the scratch, edit and paste specs were run again on the merged
 main, 27/27. One flake is open: *More… opens the page* failed once in a full
 run and passed on three reruns, and has not been traced.
+
+## Assignee on the create form, and an assignee filter ✅ built and driven
+
+Two reversals of earlier calls, both because the vault changed under them. The
+Assignee menu entry above left the create form alone on the reasoning that
+who wants the work is known while logging it and who will do it usually is
+not. That held for a vault of one person's own notes. It stops holding once the
+work is split across people and a task is often created *for* someone, so the
+form now has an Assignee field beside Reporter, the same `Suggest` menu fed by
+`allAssignees`, and it is required: every item made from the form has an owner.
+`item-form.ts` carries it as `assignee`; `canCreate` keeps the button off while
+it is blank and `toInput` returns null for it too, so Enter in a text box cannot
+send what the button refuses. It is not a sticky field, deliberately: an owner
+carried to an unrelated note is the kind of mistake nobody sees until later, so
+promoting a batch of scratch notes means naming the assignee on each. The
+scratch pad's promote panel gets all of this for free because the two share
+`ItemFormFields`. The requirement lives in the form only. The core, the CLI, the
+MCP server and CSV import still accept unassigned items, because forcing it
+there would break scripted capture and every existing caller for a rule that is
+about how people use the app.
+
+The toolbar had a reporter filter and no assignee one; the comment on
+`allAssignees` called that a non-goal, and it was, until "what is on Priya's
+plate" became the first thing to ask of the board. The filter is one more shared
+`App.tsx` state, `assignee`, holding `all`, `UNASSIGNED` or a folded name, for
+the reason the reporter filter folds. `Unassigned` is offered whether or not
+anyone has been assigned yet, because "what has nobody picked up" is a question
+that makes sense in an empty vault. The rule is `matchesAssignee` in
+`pieces.tsx` so it can be tested without rendering. Backlog, board and calendar
+get it through `filtered`; the agenda gets it through its own narrowed list,
+because it deliberately reads `visibleItems` and not `filtered`, and the other
+shared filters still do not apply there. History gets nothing: its rows are
+commits, which carry no per-item assignee, and filtering them by an item's
+*current* assignee would show different history to the same commit as people
+were reassigned. A dangling filter (the last item carrying a name goes away)
+falls back to Any assignee, the same recovery the reporter filter has.
+
+**Tests.** Unit tests for `matchesAssignee` and for `toInput` carrying the
+assignee, trimmed or omitted. The create-dialog e2e now fills and asserts it,
+and `assignee-filter.e2e.mts` drives the select across backlog, board and agenda
+and checks History has none. Typecheck clean. The core suite has one failure,
+`turnOnHistory repairs a repo whose commits were failing`, which expects no git
+identity and finds a global one on this machine; it is in code this change did
+not touch.

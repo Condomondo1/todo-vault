@@ -32,6 +32,17 @@ function field(page: Page, label: string) {
   return dialog(page).locator(`label:has(> span:text-is(${JSON.stringify(label)}))`);
 }
 
+/** The Assignee box, which the form requires before Create turns on. */
+function assigneeInput(page: Page) {
+  return dialog(page).locator(".modal-field:has(> span:text-is('Assignee')) input");
+}
+
+/** Names the assignee and tabs away, which commits it and closes the suggestion menu over the fields below. */
+async function nameAssignee(page: Page, name: string): Promise<void> {
+  await assigneeInput(page).fill(name);
+  await assigneeInput(page).press("Tab");
+}
+
 function createButton(page: Page) {
   return dialog(page).getByRole("button", { name: "Create", exact: true });
 }
@@ -100,6 +111,17 @@ describe("the New item dialog, driven end to end", { concurrency: 1 }, () => {
     assert.equal(await createButton(page).isDisabled(), true, "a blank summary must not enable Create");
   });
 
+  test("Create stays off until an assignee is named", async () => {
+    await field(page, "Summary").locator("input").fill("Needs an owner");
+    assert.equal(await createButton(page).isDisabled(), true, "a summary alone must not enable Create");
+
+    await assigneeInput(page).fill("   ");
+    assert.equal(await createButton(page).isDisabled(), true, "a blank assignee must not enable Create");
+
+    await assigneeInput(page).fill("Grace");
+    assert.equal(await createButton(page).isDisabled(), false);
+  });
+
   test("Escape closes it without writing anything", async () => {
     await field(page, "Summary").locator("input").fill("Never created");
     await closeDialog(page);
@@ -153,6 +175,7 @@ describe("the New item dialog, driven end to end", { concurrency: 1 }, () => {
     await field(page, "Labels").locator("input").fill("alpha, , beta ,");
     await field(page, "Cadence").locator("select").selectOption("weekly");
     await dialog(page).locator(".modal-field:has(> span:text-is('Reporter')) input").fill("Ada");
+    await dialog(page).locator(".modal-field:has(> span:text-is('Assignee')) input").fill("Grace");
 
     const surface = dialog(page).locator("div.description.prose.rich-surface[contenteditable]");
     await surface.click();
@@ -171,6 +194,7 @@ describe("the New item dialog, driven end to end", { concurrency: 1 }, () => {
     assert.deepEqual(item.labels, ["alpha", "beta"]);
     assert.equal(item.cadence, "weekly");
     assert.equal(item.reporter, "Ada");
+    assert.equal(item.assignee, "Grace");
     assert.equal(item.description.trim(), "Typed into the rich editor");
   });
 
@@ -184,6 +208,7 @@ describe("the New item dialog, driven end to end", { concurrency: 1 }, () => {
   test("source mode edits the raw markdown and Create keeps it verbatim", async () => {
     await openDialog(page);
     await field(page, "Summary").locator("input").fill("Source mode note");
+    await nameAssignee(page, "Grace");
     await dialog(page).getByRole("button", { name: "source" }).click();
     await dialog(page).locator("textarea[placeholder^='Markdown']").fill("- one\n- two");
     await createButton(page).click();
@@ -207,6 +232,7 @@ describe("the New item dialog, driven end to end", { concurrency: 1 }, () => {
     assert.equal(await field(page, "Parent").locator("select").inputValue(), taskKey);
 
     await field(page, "Summary").locator("input").fill("Child from the panel");
+    await nameAssignee(page, "Grace");
     await createButton(page).click();
     await dialog(page).waitFor({ state: "detached" });
 

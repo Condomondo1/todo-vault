@@ -24,7 +24,7 @@ const ITEMS = [
 ];
 
 function filled(over: Partial<ItemFormValues> = {}): ItemFormValues {
-  return { ...initialValues(PROJECTS), summary: "Do it", ...over };
+  return { ...initialValues(PROJECTS), summary: "Do it", assignee: "Grace", ...over };
 }
 
 test("the form opens on the first project as a task, with everything else empty", () => {
@@ -34,7 +34,10 @@ test("the form opens on the first project as a task, with everything else empty"
   assert.equal(v.type, "task");
   assert.equal(v.priority, "medium");
   assert.equal(v.cadence, "none");
-  assert.deepEqual([v.summary, v.parent, v.dueDate, v.category, v.labels, v.reporter], ["", "", "", "", "", ""]);
+  assert.deepEqual(
+    [v.summary, v.parent, v.dueDate, v.category, v.labels, v.reporter, v.assignee],
+    ["", "", "", "", "", "", ""],
+  );
 });
 
 test("a seed overrides the project, type and parent it names", () => {
@@ -55,6 +58,7 @@ test("toInput trims, drops empties and splits labels on commas", () => {
       category: "  ops ",
       labels: "alpha, , beta ,",
       reporter: "  Ada ",
+      assignee: "  Grace ",
       dueDate: "",
       parent: "",
     }),
@@ -72,7 +76,14 @@ test("toInput trims, drops empties and splits labels on commas", () => {
     labels: ["alpha", "beta"],
     cadence: "none",
     reporter: "Ada",
+    assignee: "Grace",
   });
+});
+
+test("a blank assignee yields no payload and keeps Create off, so Enter cannot send it either", () => {
+  assert.equal(toInput(filled({ assignee: "" })), null);
+  assert.equal(toInput(filled({ assignee: "   " })), null);
+  assert.equal(canCreate(filled({ assignee: "   " }), false), false);
 });
 
 test("a blank summary yields no payload", () => {
@@ -123,7 +134,14 @@ test("reseeding keeps project, parent and category and replaces type, summary an
 });
 
 test("reseeding sends the fields that are not sticky back to their defaults", () => {
-  const before = filled({ priority: "high", dueDate: "2031-01-01", labels: "x", cadence: "weekly", reporter: "Ada" });
+  const before = filled({
+    priority: "high",
+    dueDate: "2031-01-01",
+    labels: "x",
+    cadence: "weekly",
+    reporter: "Ada",
+    assignee: "Grace",
+  });
 
   const after = reseed(before, { summary: "Next" }, PROJECTS, ITEMS);
 
@@ -132,6 +150,7 @@ test("reseeding sends the fields that are not sticky back to their defaults", ()
   assert.equal(after.labels, "");
   assert.equal(after.cadence, "none");
   assert.equal(after.reporter, "");
+  assert.equal(after.assignee, "");
 });
 
 test("a sticky parent is checked again against the next note's type", () => {

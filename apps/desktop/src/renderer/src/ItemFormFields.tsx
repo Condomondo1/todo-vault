@@ -25,6 +25,7 @@ export function ItemFormFields({
   form,
   projects,
   reporters,
+  assignees,
   summaryRef,
   onSubmit,
 }: {
@@ -32,6 +33,8 @@ export function ItemFormFields({
   projects: ProjectSummary[];
   /** Every name the vault has used, for the Reporter menu. Derived in App. */
   reporters: string[];
+  /** Same deal as `reporters`, for the Assignee menu. */
+  assignees: string[];
   /** For the host to focus the summary when it opens. */
   summaryRef?: React.Ref<HTMLInputElement>;
   /**
@@ -161,9 +164,9 @@ export function ItemFormFields({
         </label>
 
         {/*
-          Who asked for this. Assignee is deliberately not here beside it: who
-          wants the work is known while you are logging it, and who will do it
-          usually is not yet — so it stays a detail-panel field.
+          Who asked for this, with Assignee — who will do it — beside it.
+          Reporter is optional; Assignee is required by this form, so every
+          item made here has an owner. (The vault itself still allows none.)
 
           A suggesting text field rather than a select, because the menu is a
           record of what has been typed, not a roster to pick from. A name it
@@ -182,6 +185,18 @@ export function ItemFormFields({
             placeholder="who asked for it"
             onChange={(v) => set("reporter", v)}
             onCommit={(v) => set("reporter", v)}
+          />
+        </div>
+
+        <div className="modal-field">
+          <span>Assignee</span>
+          <Suggest
+            value={values.assignee}
+            suggestions={assignees}
+            placeholder="required — who will do it"
+            required
+            onChange={(v) => set("assignee", v)}
+            onCommit={(v) => set("assignee", v)}
           />
         </div>
       </div>

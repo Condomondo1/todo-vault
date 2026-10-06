@@ -139,6 +139,8 @@ describe("Draft with Claude, driven end to end", { concurrency: 1 }, () => {
   });
 
   test("Create is what makes it an item, and it is still one request", async () => {
+    // The draft never names an assignee; the form requires one before Create.
+    await panel().locator(".modal-field:has(> span:text-is('Assignee')) input").fill("Grace");
     await summary().focus();
     await page.keyboard.press("Control+Enter");
 
