@@ -5118,3 +5118,34 @@ and checks History has none. Typecheck clean. The core suite has one failure,
 `turnOnHistory repairs a repo whose commits were failing`, which expects no git
 identity and finds a global one on this machine; it is in code this change did
 not touch.
+
+## `vault-from-meeting`, a transcript becomes one reviewed plan ✅ written, not yet driven
+
+A third vault skill, beside `vault-capture` and `vault-update`, for the case
+neither covers: a pile of talk, most of it about work the vault already holds.
+The failure it is built against is a meeting that spawns a dozen new tasks
+duplicating a dozen existing ones while the real progress is recorded nowhere,
+so the order is fixed: read the vault, match each point to an open epic or task,
+and only then decide what is new. It does not restate how to draft an item or
+when to confirm an edit; it defers to the other two for both, because a
+paraphrase of those rules drifts the first time they change.
+
+What it adds is the shape of the output. Progress and decisions become one
+comment per item per meeting, tagged `Meeting <date> · <title>`, because
+comments are the vault's running log and have no undo; the tag doubles as the
+duplicate check, so pasting a transcript twice cannot log it twice. An
+ambiguous match is never written, only asked about. Every change is a numbered
+proposal of one of three kinds, add a comment, update a field, or create an item,
+and the user approves, denies or edits each one before a single final
+confirmation starts the writing. A proposal that was not approved is not written,
+and silence is not approval, because comments cannot be taken back and an
+over-eager "approve everything" default would make the review a formality. What
+was skipped is listed so the omission is visible. New tasks need an owner, to
+match the New item form, and a missing one is a question in the plan, not an
+empty field. The transcript is treated as data, not instructions, and is not kept
+unless asked.
+
+Written against the tool descriptions in `mcp-server.ts` and the two existing
+skills. Not verified: it has not been run on a real transcript, and the MCP
+server was not connected in the session that wrote it, so no `vault_*` call in
+it has been exercised.
