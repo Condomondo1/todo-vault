@@ -46,6 +46,7 @@ describe("promoting scratch notes, driven end to end", { concurrency: 1 }, () =>
   const panel = () => page.locator("aside.promote");
   const field = (label: string) => panel().locator(`label:has(> span:text-is(${JSON.stringify(label)}))`);
   const summary = () => field("Summary").locator("input");
+  const assignee = () => panel().locator(".modal-field:has(> span:text-is('Assignee')) input");
   const toast = () => page.locator(".toast");
   const noteFiles = async (): Promise<string[]> =>
     (await fs.readdir(path.join(harness.vaultRoot, "scratch"))).filter((f) => f.endsWith(".md"));
@@ -103,11 +104,13 @@ describe("promoting scratch notes, driven end to end", { concurrency: 1 }, () =>
     await field("Project").locator("select").selectOption("ACME");
     await field("Parent").locator("select").selectOption(epicKey);
     await field("Category").locator("input").fill("triage");
+    await assignee().fill("Grace");
 
     await summary().focus();
     await page.keyboard.press("Control+Enter");
 
     const item = await created(BUG_NOTE);
+    assert.equal(item.assignee, "Grace");
     assert.equal(item.project, "ACME");
     assert.equal(item.type, "bug");
     assert.equal(item.parent, epicKey);
@@ -142,10 +145,12 @@ describe("promoting scratch notes, driven end to end", { concurrency: 1 }, () =>
     assert.equal(await field("Project").locator("select").inputValue(), "ACME");
     assert.equal(await field("Parent").locator("select").inputValue(), epicKey);
     assert.equal(await field("Category").locator("input").inputValue(), "triage");
+    assert.equal(await assignee().inputValue(), "", "an assignee is not carried to an unrelated note");
     assert.equal(await page.locator('.scratch-card[aria-selected="true"]').count(), 1);
   });
 
   test("Ctrl+Enter works from inside the description editor too", async () => {
+    await assignee().fill("Grace");
     const surface = panel().locator("div.description.prose.rich-surface[contenteditable]");
     await surface.click();
     await page.keyboard.press("Control+End");
@@ -170,6 +175,7 @@ describe("promoting scratch notes, driven end to end", { concurrency: 1 }, () =>
   test("Create & keep note makes the item, leaves the note and does not refill the form", async () => {
     const before = await noteFiles();
     const summaryBefore = await summary().inputValue();
+    await assignee().fill("Grace");
 
     await panel().getByRole("button", { name: "Create & keep note" }).click();
 
@@ -210,6 +216,7 @@ describe("promoting scratch notes, driven end to end", { concurrency: 1 }, () =>
     const notesBefore = await noteFiles();
 
     await summary().fill(tooLong);
+    await assignee().fill("Grace");
     await panel().getByRole("button", { name: "Create item" }).click();
 
     await panel().locator(".modal-error").waitFor({ state: "visible" });

@@ -88,6 +88,20 @@ export function knownPeople(items: Item[], field: "reporter" | "assignee"): stri
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 
+/** The assignee filter's value for "nobody has picked this up". Not a name anyone can have. */
+export const UNASSIGNED = "::unassigned";
+
+/**
+ * Whether an item passes the assignee filter. `filter` is "all", `UNASSIGNED`,
+ * or a folded (lowercased) name — folded for the same reason the reporter
+ * filter is: the menu's canonical spelling can change under a live filter.
+ */
+export function matchesAssignee(item: Item, filter: string): boolean {
+  if (filter === "all") return true;
+  const name = item.assignee?.trim().toLowerCase() ?? "";
+  return filter === UNASSIGNED ? name === "" : name === filter;
+}
+
 /** `knownPeople` for reporter — kept as a name because it reads better at its
  * call sites. */
 export function knownReporters(items: Item[]): string[] {

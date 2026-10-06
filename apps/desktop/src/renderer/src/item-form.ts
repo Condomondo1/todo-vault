@@ -21,6 +21,7 @@ export interface ItemFormValues {
   labels: string;
   cadence: Cadence;
   reporter: string;
+  assignee: string;
 }
 
 /** The fields a caller may set when it opens the form. Everything else starts empty. */
@@ -51,6 +52,7 @@ export function initialValues(projects: { key: string }[], seed: ItemFormSeed = 
     labels: "",
     cadence: "none",
     reporter: "",
+    assignee: "",
   };
 }
 
@@ -91,7 +93,10 @@ export function reseed(
  */
 export function toInput(values: ItemFormValues): CreateItemInput | null {
   const summary = values.summary.trim();
-  if (!summary || !values.project) return null;
+  // Assignee is required by this form, not by the vault: the CLI, the MCP server
+  // and CSV import still create unassigned work. Checked here as well as in
+  // `canCreate` so Enter in a text box cannot slip past the greyed button.
+  if (!summary || !values.project || !values.assignee.trim()) return null;
 
   return {
     project: values.project,
@@ -110,6 +115,7 @@ export function toInput(values: ItemFormValues): CreateItemInput | null {
       .filter(Boolean),
     cadence: values.cadence,
     reporter: values.reporter.trim() || undefined,
+    assignee: values.assignee.trim(),
   };
 }
 
@@ -120,5 +126,10 @@ export function toInput(values: ItemFormValues): CreateItemInput | null {
  * has always sent it and shown the vault's own message.
  */
 export function canCreate(values: ItemFormValues, saving: boolean): boolean {
-  return !saving && values.summary.trim() !== "" && !(values.type === "subtask" && !values.parent);
+  return (
+    !saving &&
+    values.summary.trim() !== "" &&
+    values.assignee.trim() !== "" &&
+    !(values.type === "subtask" && !values.parent)
+  );
 }

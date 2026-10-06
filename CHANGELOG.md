@@ -9,6 +9,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/). Until 1.0.0
 the version is pre-1.0 semver: 1.0.0 is reserved for freezing the vault file
 format (`SCHEMA.md`) and the MCP tool names and shapes.
 
+## [Unreleased]
+
+### Added
+
+- **Assignee on New item, and required there.** The create form, and the scratch
+  pad's promote panel, take an Assignee beside Reporter, with the same menu of
+  names already in the vault, and will not create until one is named. Only the
+  app's form requires it: the CLI, the MCP server and CSV import still allow
+  unassigned work.
+- **Filter by assignee.** The toolbar has an assignee menu, with Unassigned, on
+  the backlog, board, calendar and agenda. History is not filtered.
+
 ## [0.9.0] - 2026-10-01
 
 The first numbered release. Everything from the initial 0.1.0 scaffold up to

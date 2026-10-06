@@ -20,6 +20,7 @@ export function CreateDialog({
   projects,
   items,
   reporters,
+  assignees,
   defaultProject,
   defaultType,
   defaultParent,
@@ -30,6 +31,8 @@ export function CreateDialog({
   items: Item[];
   /** Every name the vault has used, for the Reporter menu. Derived in App. */
   reporters: string[];
+  /** Same deal as `reporters`, for the Assignee menu. */
+  assignees: string[];
   defaultProject: string | null;
   /** Optional: the toolbar and the `n` shortcut open with neither and land on `task`. */
   defaultType?: ItemType;
@@ -170,7 +173,13 @@ export function CreateDialog({
             </div>
           )}
 
-          <ItemFormFields form={form} projects={projects} reporters={reporters} summaryRef={summaryRef} />
+          <ItemFormFields
+            form={form}
+            projects={projects}
+            reporters={reporters}
+            assignees={assignees}
+            summaryRef={summaryRef}
+          />
 
           {error && <div className="modal-error">{error}</div>}
         </div>

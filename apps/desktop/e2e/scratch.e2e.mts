@@ -300,6 +300,7 @@ describe("the scratch pad, driven end to end", { concurrency: 1 }, () => {
     const promoted = (await page.locator('.scratch-card[aria-selected="true"]').getAttribute("data-note-id")) as string;
     const summary = page.locator("aside.promote label:has(> span:text-is(\"Summary\")) input");
     await summary.waitFor({ state: "visible" });
+    await page.locator("aside.promote .modal-field:has(> span:text-is('Assignee')) input").fill("Grace");
     await summary.focus();
     await page.keyboard.press("Control+Enter");
     await eventually("the promoted note to leave scratch/", noteFiles, (files) => !files.includes(`${promoted}.md`));

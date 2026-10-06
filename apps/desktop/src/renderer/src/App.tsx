@@ -32,7 +32,16 @@ import { backlogOrder, boardLanes, visibleBoardStatuses } from "./ordering";
 import { monthGrid, stepMonth } from "./calendar";
 import { rangeBetween } from "./selection";
 import { THEME_DESCRIPTIONS, THEME_LABELS, nextTheme } from "./theme";
-import { BOARD_ORDER, STATUS_LABELS, isClosed, knownPeople, knownReporters, todayIso } from "./pieces";
+import {
+  BOARD_ORDER,
+  STATUS_LABELS,
+  UNASSIGNED,
+  isClosed,
+  knownPeople,
+  knownReporters,
+  matchesAssignee,
+  todayIso,
+} from "./pieces";
 import { BulkBar } from "./BulkBar";
 import { isLater } from "./later";
 import { JiraPush } from "./JiraPush";
@@ -65,6 +74,12 @@ export function App(): React.JSX.Element {
    * "john doe" are one person holds when you act on it.
    */
   const [reporter, setReporter] = useState<string>("all");
+  /**
+   * The assignee filter: "all", `UNASSIGNED`, or a folded (lowercased) name, for
+   * the same reason the reporter filter folds. Shared by backlog, board, agenda
+   * and calendar; History has no per-item assignee data to match against.
+   */
+  const [assignee, setAssignee] = useState<string>("all");
   /**
    * The type filter, holding the types to *keep*. Empty means every type.
    *
@@ -311,11 +326,19 @@ export function App(): React.JSX.Element {
 
   /**
    * Assignee's counterpart to `allReporters` — same source, same reasoning:
-   * hiding a project should not make a colleague un-nameable in the menu. There
-   * is no `assignees` (visible-only) twin because nothing filters on assignee
-   * yet; see the toolbar non-goal.
+   * hiding a project should not make a colleague un-nameable in the menu.
+   * `assignees` is the visible-only twin that feeds the toolbar filter, for the
+   * reason `reporters` is.
    */
   const allAssignees = useMemo(() => knownPeople(snapshot?.items ?? [], "assignee"), [snapshot]);
+  const assignees = useMemo(() => knownPeople(visibleItems, "assignee"), [visibleItems]);
+
+  // The agenda reads `visibleItems` rather than `filtered` (see its call site), so
+  // the assignee filter reaches it through its own narrowed list.
+  const agendaItems = useMemo(
+    () => visibleItems.filter((item) => matchesAssignee(item, assignee)),
+    [visibleItems, assignee],
+  );
 
   /**
    * Open items per project, for the Hide button's tooltip. The count alone is
@@ -394,7 +417,15 @@ export function App(): React.JSX.Element {
     if (reporter !== "all" && !reporters.some((name) => name.toLowerCase() === reporter)) {
       setReporter("all");
     }
-  }, [snapshot, visibleItems, selected, detailKey, project, reporter, reporters]);
+    // And for assignee, which is derived from the items in the same way.
+    if (
+      assignee !== "all" &&
+      assignee !== UNASSIGNED &&
+      !assignees.some((name) => name.toLowerCase() === assignee)
+    ) {
+      setAssignee("all");
+    }
+  }, [snapshot, visibleItems, selected, detailKey, project, reporter, reporters, assignee, assignees]);
 
   const filtered = useMemo<Item[]>(() => {
     if (!snapshot) return [];
@@ -407,6 +438,7 @@ export function App(): React.JSX.Element {
       if (types.size && !types.has(item.type)) return false;
       if (cadence !== "all" && item.cadence !== cadence) return false;
       if (reporter !== "all" && item.reporter?.trim().toLowerCase() !== reporter) return false;
+      if (!matchesAssignee(item, assignee)) return false;
       if (openOnly && isClosed(item.status)) return false;
       if (dropLater && isLater(item, today)) return false;
       if (needle) {
@@ -415,7 +447,25 @@ export function App(): React.JSX.Element {
       }
       return true;
     });
-  }, [snapshot, visibleItems, project, status, types, cadence, reporter, openOnly, hideLater, view, text]);
+  }, [snapshot, visibleItems, project, status, types, cadence, reporter, assignee, openOnly, hideLater, view, text]);
+
+  // Offered even when nobody is assigned yet, because "Unassigned" is the answer
+  // to "what has nobody picked up" — the one question this vault starts with.
+  const assigneeFilter = (
+    <select
+      value={assignee}
+      onChange={(e) => setAssignee(e.target.value)}
+      title="Who will do the work"
+    >
+      <option value="all">Any assignee</option>
+      <option value={UNASSIGNED}>Unassigned</option>
+      {assignees.map((name) => (
+        <option key={name} value={name.toLowerCase()}>
+          {name}
+        </option>
+      ))}
+    </select>
+  );
 
   /**
    * Every key the vault still holds — not `visibleItems`.
@@ -1468,14 +1518,17 @@ export function App(): React.JSX.Element {
               ))}
             </select>
           ) : view === "agenda" ? (
-            <select value={scope} onChange={(e) => setScope(e.target.value as AgendaScope)}>
-              <option value="today">Today</option>
-              <option value="week">This week</option>
-              <option value="nextWeek">Next week</option>
-              <option value="twoWeeks">This week and next</option>
-              <option value="month">This month</option>
-              <option value="next30Days">Next 30 days</option>
-            </select>
+            <>
+              <select value={scope} onChange={(e) => setScope(e.target.value as AgendaScope)}>
+                <option value="today">Today</option>
+                <option value="week">This week</option>
+                <option value="nextWeek">Next week</option>
+                <option value="twoWeeks">This week and next</option>
+                <option value="month">This month</option>
+                <option value="next30Days">Next 30 days</option>
+              </select>
+              {assigneeFilter}
+            </>
           ) : view === "scratch" ? null : (
             <>
               {/*
@@ -1547,6 +1600,7 @@ export function App(): React.JSX.Element {
                   ))}
                 </select>
               )}
+              {assigneeFilter}
               {/*
                 Toggles rather than a select, because "everything except
                 subtasks" is one of the two things worth asking for and a select
@@ -1751,9 +1805,10 @@ export function App(): React.JSX.Element {
                 core, over the whole vault, so this is the only thing keeping a
                 hidden project's overdue work off the agenda. Without it, hiding
                 would silence the board and the backlog but not the one view
-                that leads with "Overdue".
+                that leads with "Overdue". Narrowed by assignee only: the other
+                shared filters are deliberately not the agenda's.
               */
-              items={visibleItems}
+              items={agendaItems}
               selected={selected}
               onSelect={open}
               onOrder={setAgendaOrder}
@@ -1829,6 +1884,7 @@ export function App(): React.JSX.Element {
           projects={visibleProjects}
           items={visibleItems}
           reporters={allReporters}
+          assignees={allAssignees}
           defaultProject={project}
           sticky={stickyRef.current}
           focusToken={summaryFocus}
@@ -1912,6 +1968,7 @@ export function App(): React.JSX.Element {
           projects={visibleProjects}
           items={visibleItems}
           reporters={allReporters}
+          assignees={allAssignees}
           /* The sidebar's project, unless a prefill names the parent's. */
           defaultProject={creating.project ?? project}
           defaultType={creating.type}

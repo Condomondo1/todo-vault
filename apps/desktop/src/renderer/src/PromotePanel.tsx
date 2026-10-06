@@ -31,6 +31,7 @@ export function PromotePanel({
   projects,
   items,
   reporters,
+  assignees,
   defaultProject,
   sticky,
   focusToken,
@@ -42,6 +43,8 @@ export function PromotePanel({
   items: Item[];
   /** Every name the vault has used, for the Reporter menu. Derived in App. */
   reporters: string[];
+  /** Same deal as `reporters`, for the Assignee menu. */
+  assignees: string[];
   /** The sidebar's project, for the first note of a session. */
   defaultProject: string | null;
   /** What the last promote used, remembered by the host across the panel closing. */
@@ -263,6 +266,7 @@ export function PromotePanel({
             form={form}
             projects={projects}
             reporters={reporters}
+            assignees={assignees}
             summaryRef={summaryRef}
             onSubmit={() => void submit(false)}
           />

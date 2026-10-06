@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { Item } from "todo-vault";
-import { knownPeople } from "../src/renderer/src/pieces.js";
+import { UNASSIGNED, knownPeople, matchesAssignee } from "../src/renderer/src/pieces.js";
 
 /** Enough of an Item for `knownPeople`, which reads only `reporter`/`assignee`. */
 function item(reporter?: string, assignee?: string): Item {
@@ -55,4 +55,22 @@ test("returns the same answer for both fields over the same data", () => {
   const forReporter = [item("John Doe"), item("john doe"), item("Priya Raman")];
   const forAssignee = forReporter.map((i) => item(undefined, i.reporter));
   assert.deepEqual(knownPeople(forAssignee, "assignee"), knownPeople(forReporter, "reporter"));
+});
+
+test("the assignee filter passes everything on all and matches a folded name", () => {
+  const dan = item(undefined, "Dan Okafor");
+  assert.equal(matchesAssignee(dan, "all"), true);
+  assert.equal(matchesAssignee(dan, "dan okafor"), true);
+  assert.equal(matchesAssignee(item(undefined, " DAN OKAFOR "), "dan okafor"), true);
+  assert.equal(matchesAssignee(dan, "priya raman"), false);
+});
+
+test("the unassigned filter keeps items with no assignee, blank or missing, and nothing else", () => {
+  assert.equal(matchesAssignee(item(), UNASSIGNED), true);
+  assert.equal(matchesAssignee(item(undefined, "   "), UNASSIGNED), true);
+  assert.equal(matchesAssignee(item(undefined, "Dan Okafor"), UNASSIGNED), false);
+});
+
+test("a named assignee filter drops unassigned items", () => {
+  assert.equal(matchesAssignee(item(), "dan okafor"), false);
 });
